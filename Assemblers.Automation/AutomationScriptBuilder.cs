@@ -6,11 +6,11 @@
     using System.Reflection;
     using System.Text.RegularExpressions;
     using System.Threading.Tasks;
-    
+
     using NuGet.Packaging.Core;
     using NuGet.Versioning;
-    
-    
+
+
     using Skyline.DataMiner.CICD.Assemblers.Common;
     using Skyline.DataMiner.CICD.Assemblers.Common.VisualStudio.Projects;
     using Skyline.DataMiner.CICD.Common.NuGet;
@@ -66,7 +66,7 @@
 
             // ToList as it will be enumerated multiple times later on.
             AllScripts = allScripts.ToList();
-            
+
             this.directoryForNuGetConfig = directoryForNuGetConfig;
         }
 
@@ -135,8 +135,8 @@
         {
             this.logCollector = logCollector ?? throw new ArgumentNullException(nameof(logCollector));
         }
-        
-        private string DataMinerSolutionId { get; } 
+
+        private string DataMinerSolutionId { get; }
 
         private XmlDocument Document { get; }
 
@@ -238,7 +238,7 @@
 
             // PackageReferences (NuGet packages)
             var harvestedReferencedProjects = GetHarvestedReferencedProjects(project);
-            
+
             var packageIdentities = project.PackageReferences != null ? GetPackageIdentities(project.PackageReferences) : new List<PackageIdentity>();
             foreach (var hrp in harvestedReferencedProjects)
             {
@@ -258,20 +258,30 @@
                 try
                 {
                     var synthetic = MSBuildHelpers.CreateSyntheticPackageAssembyReference(hrp);
-                    if (synthetic != null &&
-                !nugetAssemblyData.DllImportNugetAssemblyReferences.Any(x =>
+                    if (synthetic == null)
+                    {
+                        continue;
+                    }
+                    if (!nugetAssemblyData.DllImportNugetAssemblyReferences.Any(x =>
                     String.Equals(x.DllImport, synthetic.DllImport, StringComparison.OrdinalIgnoreCase) &&
                     String.Equals(x.AssemblyPath, synthetic.AssemblyPath, StringComparison.OrdinalIgnoreCase)))
                     {
                         nugetAssemblyData.DllImportNugetAssemblyReferences.Add(synthetic);
                     }
+                    if (!nugetAssemblyData.NugetAssemblies.Any(x =>
+                   String.Equals(x.DllImport, synthetic.DllImport, StringComparison.OrdinalIgnoreCase) &&
+                   String.Equals(x.AssemblyPath, synthetic.AssemblyPath, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        nugetAssemblyData.NugetAssemblies.Add(synthetic);
+                    }
+
                 }
                 catch (Exception ex)
                 {
                     LogDebug($"BuildDllImportsAsync|Error creating synthetic package assembly reference for referenced project: {hrp.ProjectPath}|Error: {ex.Message}");
                 }
             }
-            if(project.References != null)
+            if (project.References != null)
             {
                 ProcessReferences(editExe, project, nugetAssemblyData, packageReferenceProcessor, buildResultItems);
             }
@@ -316,7 +326,8 @@
 
             return nugetAssemblyData;
         }
-        private List<ReferencedProjectInfo> GetHarvestedReferencedProjects(Project project)
+
+        public List<ReferencedProjectInfo> GetHarvestedReferencedProjects(Project project)
         {
             var harvestedReferencedProjects = new List<ReferencedProjectInfo>();
             var visitedProjectPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -405,7 +416,7 @@
             }
         }
 
-        private void ProcessLibAssemblies(EditXml.XmlElement editExe, BuildResultItems buildResultItems, NuGetPackageAssemblyData nugetAssemblyData)
+        public void ProcessLibAssemblies(EditXml.XmlElement editExe, BuildResultItems buildResultItems, NuGetPackageAssemblyData nugetAssemblyData)
         {
             HashSet<string> directoriesWithExplicitDllImport = new HashSet<string>();
             Dictionary<string, string> potentialRemainingDirectoryImports = new Dictionary<string, string>();
@@ -778,7 +789,7 @@
 
             foreach (var r in project.ProjectReferences)
             {
-                
+
                 try
                 {
                     var prPath = r.Path;
@@ -792,7 +803,7 @@
                             if (rinfo != null && rinfo.ShouldHarvestAsNuGetAssemblies())
                             {
                                 LogDebug($"Skipping script-library handling for harvested referenced project: {fullRefPath}");
-                                continue; 
+                                continue;
                             }
                         }
                     }
