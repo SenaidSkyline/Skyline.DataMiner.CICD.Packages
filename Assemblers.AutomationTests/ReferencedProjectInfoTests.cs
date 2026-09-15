@@ -60,7 +60,7 @@ namespace Assemblers.AutomationTests
 
             var path = info.GetDllImportRelativePath();
 
-            Assert.AreEqual("Assemblies/ProtocolScripts/DllImport/Pkg.Id/2.0.0/lib/netstandard2.0/Lib.dll", path);
+            Assert.AreEqual("pkg.id/2.0.0/lib/netstandard2.0/Lib.dll", path);
         }
 
     }
