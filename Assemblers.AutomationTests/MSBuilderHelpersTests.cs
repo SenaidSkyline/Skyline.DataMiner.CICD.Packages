@@ -54,34 +54,31 @@ namespace Assemblers.AutomationTests
             Assert.IsTrue(info.ShouldHarvestAsNuGetAssemblies());
         }
         [TestMethod]
-        public void CreateSyntheticPackageAssemblyReference_QAOpsApiCommon_ReturnsReference()
+        public void EvaluateReferenceProject_DataMinerProject_IsNotHarvested()
         {
-            var csprojPath = @"C:\Users\SenaidVD\Desktop\Skyline-QAOps\Dxm\QAOps.Api.Common\QAOps.Api.Common.csproj";
+            var dir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+            Directory.CreateDirectory(dir);
+            var csprojPath = Path.Combine(dir, "Lib.csproj");
+
+            File.WriteAllText(csprojPath, """
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>DataMinerLib</AssemblyName>
+    <PackageId>DataMiner.Lib</PackageId>
+    <PackageVersion>1.0.0</PackageVersion>
+    <IsPackable>true</IsPackable>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <DataMinerType>AutomationScript</DataMinerType>
+  </PropertyGroup>
+</Project>
+""");
 
             var info = MSBuildHelpers.EvaluateReferenceProject(csprojPath);
 
             Assert.IsNotNull(info);
-
-            var reference = MSBuildHelpers.CreateSyntheticPackageAssembyReference(info);
-
-            Assert.IsNotNull(reference);
-        }
-        [TestMethod]
-        public void CreateSyntheticPackageAssemblyReference_QAOpsApi_ReturnsReference()
-        {
-            var csprojPath = @"C:\Users\SenaidVD\Desktop\Skyline-QAOps\Dxm\QAOps.Api\QAOps.Api.csproj";
-
-            var info = MSBuildHelpers.EvaluateReferenceProject(csprojPath);
-
-            Assert.IsNotNull(info);
-
-            var reference = MSBuildHelpers.CreateSyntheticPackageAssembyReference(info);
-
-            Assert.IsNotNull(reference);
-
-            Console.WriteLine($"DllImport = {reference.DllImport}");
-            Console.WriteLine($"AssemblyPath = {reference.AssemblyPath}");
-            Console.WriteLine($"IsFilesPackage = {reference.IsFilesPackage}");
+            Assert.IsTrue(info.IsDataMinerProject);
+            Assert.IsFalse(info.ShouldHarvestAsNuGetAssemblies());
         }
     }
     

@@ -1214,7 +1214,93 @@ class Class1 {}]]>
 
                 result.DllAssemblies.Should().BeEmpty();
             }
+           
+            }
 
+        
+    [TestMethod]
+        public async Task AutomationScriptBuilder_ProjectReferenceHarvesting_PackableProject_AddsDllImportAsync()
+        {
+            // Arrange
+            string testDirectory = TestFixture.InitializeDirectoryForTest();
+
+            string libraryProjectPath = Path.Combine(testDirectory, "TestLibrary.csproj");
+
+            File.WriteAllText(libraryProjectPath, @"<Project Sdk=""Skyline.DataMiner.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <AssemblyName>TestLibrary</AssemblyName>
+    <PackageId>Test.Library</PackageId>
+    <PackageVersion>1.0.0</PackageVersion>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+<ItemGroup>
+    <PackageReference Include=""Newtonsoft.Json"" Version=""13.0.1"" />
+  </ItemGroup>
+</Project>");
+
+            var projectFiles = new[]
+       {
+    new ProjectFile("Script.cs", "using System;")
+};
+
+            var projectReferences = new[]
+            {
+    new ProjectReference(
+        "TestLibrary",
+        libraryProjectPath,
+        libraryProjectPath)
+};
+
+            var scriptProject = new Project(
+                "Script_1",
+                path: Path.Combine(testDirectory, "Script_1.csproj"),
+                tfm: "net48",
+                projectFiles: projectFiles,
+                projectReferences: projectReferences);
+            
+            var projects = new Dictionary<string, Project>
+            {
+                ["Script_1"] = scriptProject,
+            };
+
+            string original = @"<DMSScript>
+    <Script>
+        <Exe id=""1"" type=""csharp"">
+            <Value><![CDATA[[Project:Script_1]]]></Value>
+        </Exe>
+    </Script>
+</DMSScript>";
+
+            Script script = new Script(XmlDocument.Parse(original));
+            var evaluatedLibrary = MSBuildHelpers.EvaluateReferenceProject(libraryProjectPath);
+            evaluatedLibrary.Should().NotBeNull();
+            evaluatedLibrary.DirectPackageReferences.Should().ContainSingle(
+                p => p.Id == "Newtonsoft.Json");
+
+            // Act
+            AutomationScriptBuilder builder = new AutomationScriptBuilder(
+                script,
+                projects,
+                new List<Script> { script },
+                directoryForNuGetConfig: null);
+          
+            var result = await builder.BuildAsync().ConfigureAwait(false);
+
+            // Assert
+            result.Should().NotBeNull();
+            result.Assemblies.Should()
+                .Contain(a =>a.DllImport == "test.library/1.0.0/lib/netstandard2.0/TestLibrary.dll");
+            result.Assemblies.Should().Contain(a =>
+        a.DllImport.StartsWith("newtonsoft.json/13.0.1/lib/", StringComparison.OrdinalIgnoreCase) &&
+        a.DllImport.EndsWith("Newtonsoft.Json.dll", StringComparison.OrdinalIgnoreCase));
+            result.Document.Should()
+                .Contain(@"C:\Skyline DataMiner\ProtocolScripts\DllImport\test.library\1.0.0\lib\netstandard2.0\TestLibrary.dll");
+       
+            result.Document.Should().Contain("Newtonsoft.Json.dll");
+
+            result.Document.Should().NotContain("scriptRef");
         }
     }
 }
