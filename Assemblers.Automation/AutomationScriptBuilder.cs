@@ -6,11 +6,11 @@
     using System.Reflection;
     using System.Text.RegularExpressions;
     using System.Threading.Tasks;
-    
+
     using NuGet.Packaging.Core;
     using NuGet.Versioning;
-    
-    
+
+
     using Skyline.DataMiner.CICD.Assemblers.Common;
     using Skyline.DataMiner.CICD.Assemblers.Common.VisualStudio.Projects;
     using Skyline.DataMiner.CICD.Common.NuGet;
@@ -66,7 +66,7 @@
 
             // ToList as it will be enumerated multiple times later on.
             AllScripts = allScripts.ToList();
-            
+
             this.directoryForNuGetConfig = directoryForNuGetConfig;
         }
 
@@ -135,8 +135,8 @@
         {
             this.logCollector = logCollector ?? throw new ArgumentNullException(nameof(logCollector));
         }
-        
-        private string DataMinerSolutionId { get; } 
+
+        private string DataMinerSolutionId { get; }
 
         private XmlDocument Document { get; }
 
@@ -237,47 +237,8 @@
             NuGetPackageAssemblyData nugetAssemblyData = null;
 
             // PackageReferences (NuGet packages)
-            var harvestedReferencedProjects = new List<ReferencedProjectInfo>();
-            try
-            {
-                if (project.ProjectReferences != null)
-                {
-                    foreach (var pr in project.ProjectReferences)
-                    {
-                        try
-                        {
-                            var prPath = pr.Path;
-                            if (string.IsNullOrWhiteSpace(prPath)) continue;
+            var harvestedReferencedProjects = GetHarvestedReferencedProjects(project);
 
-                            var baseDir = project.ProjectDirectory ?? Path.GetDirectoryName(project.Path) ?? ".";
-                            var fullRefPath = Path.IsPathRooted(prPath) ? prPath : Path.GetFullPath(Path.Combine(baseDir, prPath));
-                            if (!File.Exists(fullRefPath))
-                            {
-                                LogDebug($"BuildDllImportsAsync|Referenced project file does not exist: {fullRefPath}");
-                                continue;
-                            }
-                            var referencedProjectInfo = MSBuildHelpers.EvaluateReferenceProject(fullRefPath);
-                            if (referencedProjectInfo == null)
-                            {
-                                LogDebug($"BuildDllImportsAsync|Referenced project file is invalid: {fullRefPath}");
-                                continue;
-                            }
-                            if (referencedProjectInfo.ShouldHarvestAsNuGetAssemblies())
-                            {
-                                harvestedReferencedProjects.Add(referencedProjectInfo);
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            LogDebug($"BuildDllImportsAsync|Error evaluating referenced project: {pr.Path}|Error: {ex.Message}");
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                LogDebug($"BuildDllImportsAsync|Unexpected error while evaluating project references for '{project?.AssemblyName}': {ex.Message}");
-            }
             var packageIdentities = project.PackageReferences != null ? GetPackageIdentities(project.PackageReferences) : new List<PackageIdentity>();
             foreach (var hrp in harvestedReferencedProjects)
             {
@@ -287,24 +248,7 @@
                         packageIdentities.Add(dpr);
                 }
             }
-            if (packageIdentities.Count > 0)
-            {
-                if (string.IsNullOrWhiteSpace(DataMinerSolutionId))
-                {
-                    nugetAssemblyData = await packageReferenceProcessor.ProcessAsync(packageIdentities, project.TargetFrameworkMoniker,
-                    DevPackHelper.AutomationDevPackNuGetDependenciesIncludingTransitive).ConfigureAwait(false);
-                }
-                else
-                {
-                    var solutionPackageIdentities = GetPackageIdentities(DataMinerSolutionProjects.Where(solProject => solProject.PackageReferences != null)
-                                                                                         .SelectMany(solProject => solProject.PackageReferences)
-                                                                                         .Distinct());
-                    nugetAssemblyData = await packageReferenceProcessor.ProcessAsync(packageIdentities, solutionPackageIdentities, project.TargetFrameworkMoniker,
-                        DevPackHelper.AutomationDevPackNuGetDependenciesIncludingTransitive).ConfigureAwait(false);
-                }
-
-            }
-           
+            nugetAssemblyData = await ProcessPackageReferences(editExe, project, packageReferenceProcessor, buildResultItems, packageIdentities).ConfigureAwait(false);
             if (nugetAssemblyData == null)
             {
                 nugetAssemblyData = new NuGetPackageAssemblyData();
@@ -314,17 +258,30 @@
                 try
                 {
                     var synthetic = MSBuildHelpers.CreateSyntheticPackageAssembyReference(hrp);
-                    if (synthetic != null)
+                    if (synthetic == null)
+                    {
+                        continue;
+                    }
+                    if (!nugetAssemblyData.DllImportNugetAssemblyReferences.Any(x =>
+                    String.Equals(x.DllImport, synthetic.DllImport, StringComparison.OrdinalIgnoreCase) &&
+                    String.Equals(x.AssemblyPath, synthetic.AssemblyPath, StringComparison.OrdinalIgnoreCase)))
                     {
                         nugetAssemblyData.DllImportNugetAssemblyReferences.Add(synthetic);
                     }
+                    if (!nugetAssemblyData.NugetAssemblies.Any(x =>
+                   String.Equals(x.DllImport, synthetic.DllImport, StringComparison.OrdinalIgnoreCase) &&
+                   String.Equals(x.AssemblyPath, synthetic.AssemblyPath, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        nugetAssemblyData.NugetAssemblies.Add(synthetic);
+                    }
+
                 }
                 catch (Exception ex)
                 {
                     LogDebug($"BuildDllImportsAsync|Error creating synthetic package assembly reference for referenced project: {hrp.ProjectPath}|Error: {ex.Message}");
                 }
             }
-            if(project.References != null)
+            if (project.References != null)
             {
                 ProcessReferences(editExe, project, nugetAssemblyData, packageReferenceProcessor, buildResultItems);
             }
@@ -344,7 +301,10 @@
 
             if (String.IsNullOrWhiteSpace(DataMinerSolutionId))
             {
-                nugetAssemblyData = await packageReferenceProcessor.ProcessAsync(packageIdentities, project.TargetFrameworkMoniker, DevPackHelper.AutomationDevPackNuGetDependenciesIncludingTransitive).ConfigureAwait(false);
+                nugetAssemblyData = await packageReferenceProcessor.ProcessAsync(packageIdentities,
+                    project.TargetFrameworkMoniker,
+                    DevPackHelper.AutomationDevPackNuGetDependenciesIncludingTransitive)
+                    .ConfigureAwait(false);
             }
             else
             {
@@ -352,7 +312,11 @@
                                                                                      .SelectMany(solProject => solProject.PackageReferences)
                                                                                      .Distinct());
 
-                nugetAssemblyData = await packageReferenceProcessor.ProcessAsync(packageIdentities, solutionPackageIdentities, project.TargetFrameworkMoniker, DevPackHelper.AutomationDevPackNuGetDependenciesIncludingTransitive).ConfigureAwait(false);
+                nugetAssemblyData = await packageReferenceProcessor.ProcessAsync(packageIdentities,
+                    solutionPackageIdentities,
+                    project.TargetFrameworkMoniker,
+                    DevPackHelper.AutomationDevPackNuGetDependenciesIncludingTransitive)
+                    .ConfigureAwait(false);
             }
 
             LogDebug($"NuGetPackageAssemblyData: {nugetAssemblyData}");
@@ -363,7 +327,96 @@
             return nugetAssemblyData;
         }
 
-        private void ProcessLibAssemblies(EditXml.XmlElement editExe, BuildResultItems buildResultItems, NuGetPackageAssemblyData nugetAssemblyData)
+        private List<ReferencedProjectInfo> GetHarvestedReferencedProjects(Project project)
+        {
+            var harvestedReferencedProjects = new List<ReferencedProjectInfo>();
+            var visitedProjectPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            CollectHarvestedReferencedProjects(project, harvestedReferencedProjects, visitedProjectPaths);
+
+            return harvestedReferencedProjects;
+        }
+
+        private void CollectHarvestedReferencedProjects(Project project, List<ReferencedProjectInfo> harvestedReferencedProjects, HashSet<string> visitedProjectPaths)
+        {
+            if (project?.ProjectReferences == null)
+            {
+                return;
+            }
+            foreach (var pr in project.ProjectReferences)
+            {
+                if (!TryGetReferencedProjectInfo(project, pr, out var referencedProjectInfo))
+                {
+                    continue;
+                }
+
+                if (!referencedProjectInfo.ShouldHarvestAsNuGetAssemblies())
+                {
+                    continue;
+                }
+
+                if (!harvestedReferencedProjects.Any(x => String.Equals(x.ProjectPath, referencedProjectInfo.ProjectPath, StringComparison.OrdinalIgnoreCase)))
+                {
+                    harvestedReferencedProjects.Add(referencedProjectInfo);
+                }
+
+                if (!visitedProjectPaths.Add(referencedProjectInfo.ProjectPath))
+                {
+                    continue;
+                }
+                try
+                {
+                    var referencedProject = Project.Load(referencedProjectInfo.ProjectPath);
+                    //recursively collect harvested referenced projects for the referenced project
+                    CollectHarvestedReferencedProjects(referencedProject, harvestedReferencedProjects, visitedProjectPaths);
+                }
+                catch (Exception ex)
+                {
+                    LogDebug($"CollectHarvestedReferencedProjects|Error loading referenced project: {referencedProjectInfo.ProjectPath}|Error: {ex.Message}");
+                }
+            }
+        }
+
+        private bool TryGetReferencedProjectInfo(Project project, ProjectReference pr, out ReferencedProjectInfo referencedProjectInfo)
+        {
+            referencedProjectInfo = null;
+
+            try
+            {
+                var projectReferencePath = pr.Path;
+                if (String.IsNullOrWhiteSpace(projectReferencePath))
+                {
+                    return false;
+                }
+
+                var baseDir = project.ProjectDirectory ?? Path.GetDirectoryName(project.Path) ?? ".";
+                var fullRefPath = Path.IsPathRooted(projectReferencePath)
+                    ? projectReferencePath
+                    : Path.GetFullPath(Path.Combine(baseDir, projectReferencePath));
+
+                if (!File.Exists(fullRefPath))
+                {
+                    LogDebug($"TryGetReferencedProjectInfo|Referenced project file does not exist: {fullRefPath}");
+                    return false;
+                }
+
+                referencedProjectInfo = MSBuildHelpers.EvaluateReferenceProject(fullRefPath);
+                if (referencedProjectInfo == null)
+                {
+                    LogDebug($"TryGetReferencedProjectInfo|Referenced project file is invalid: {fullRefPath}");
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogDebug($"TryGetReferencedProjectInfo|Error evaluating referenced project: {pr.Path}|Error: {ex.Message}");
+                return false;
+            }
+        }
+
+        public void ProcessLibAssemblies(EditXml.XmlElement editExe, BuildResultItems buildResultItems, NuGetPackageAssemblyData nugetAssemblyData)
         {
             HashSet<string> directoriesWithExplicitDllImport = new HashSet<string>();
             Dictionary<string, string> potentialRemainingDirectoryImports = new Dictionary<string, string>();
@@ -736,7 +789,7 @@
 
             foreach (var r in project.ProjectReferences)
             {
-                
+
                 try
                 {
                     var prPath = r.Path;
@@ -750,7 +803,7 @@
                             if (rinfo != null && rinfo.ShouldHarvestAsNuGetAssemblies())
                             {
                                 LogDebug($"Skipping script-library handling for harvested referenced project: {fullRefPath}");
-                                continue; 
+                                continue;
                             }
                         }
                     }

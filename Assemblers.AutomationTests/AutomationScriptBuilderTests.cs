@@ -2,6 +2,7 @@
 {
     using System;
     using System.Collections.Generic;
+    using System.IO;
     using System.Linq;
     using System.Reflection;
     using System.Threading.Tasks;
@@ -1083,7 +1084,62 @@ class Class1 {}]]>
 
             result.DllAssemblies.Should().BeEmpty();
         }
+        [TestMethod]
+        public async Task AutomationScriptBuilder_Harvests_QAOpsApiProjects()
+        {
+            // Arrange
+            string projectPath = @"C:\Users\SenaidVD\Desktop\Skyline-QAOps\Skyline-QAOps-SendTokenDeletionRequest\Skyline-QAOps-SendTokenDeletionRequest.csproj";
 
+            Project project = Project.Load(projectPath);
+
+            var projects = new Dictionary<string, Project>
+    {
+        { project.ProjectName, project }
+    };
+
+            string original = $@"<DMSScript>
+    <Script>
+        <Exe id=""1"" type=""csharp"">
+            <Value><![CDATA[[Project:{project.ProjectName}]]]></Value>
+        </Exe>
+    </Script>
+</DMSScript>";
+
+            Script script = new Script(XmlDocument.Parse(original));
+
+            var builder = new AutomationScriptBuilder(
+                script,
+                projects,
+                new List<Script> { script },
+                directoryForNuGetConfig: null);
+
+            // Act
+            var result = await builder.BuildAsync().ConfigureAwait(false);
+
+            File.WriteAllText(
+    @"C:\Users\SenaidVD\Desktop\qaops-generated.xml",
+    result.Document);
+
+            // Assert
+            result.Document.Should().Contain("Skyline.DataMiner.QAOps.Api.dll");
+            result.Document.Should().Contain("Skyline.DataMiner.QAOps.Api.Common.dll");
+            Console.WriteLine("=== ASSEMBLIES ===");
+            foreach (var assembly in result.Assemblies)
+            {
+                Console.WriteLine($"DllImport: {assembly.DllImport}");
+                Console.WriteLine($"AssemblyPath: {assembly.AssemblyPath}");
+            }
+
+            result.Assemblies.Should().Contain(x =>
+                x.AssemblyPath.EndsWith(
+                    "Skyline.DataMiner.QAOps.Api.dll",
+                    StringComparison.OrdinalIgnoreCase));
+
+            result.Assemblies.Should().Contain(x =>
+                x.AssemblyPath.EndsWith(
+                    "Skyline.DataMiner.QAOps.Api.Common.dll",
+                    StringComparison.OrdinalIgnoreCase));
+        }
         [TestMethod]
         public async Task AutomationScriptBuilder_DataMinerSolutionId_AllScriptsShouldHaveSameNuGetVersion()
         {
@@ -1158,6 +1214,7 @@ class Class1 {}]]>
 
                 result.DllAssemblies.Should().BeEmpty();
             }
+
         }
     }
 }
