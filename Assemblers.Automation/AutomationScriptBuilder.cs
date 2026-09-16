@@ -327,7 +327,7 @@
             return nugetAssemblyData;
         }
 
-        public List<ReferencedProjectInfo> GetHarvestedReferencedProjects(Project project)
+        private List<ReferencedProjectInfo> GetHarvestedReferencedProjects(Project project)
         {
             var harvestedReferencedProjects = new List<ReferencedProjectInfo>();
             var visitedProjectPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
