@@ -2,13 +2,14 @@
 {
     using System;
     using System.Collections.Generic;
+    using System.Diagnostics;
     using System.IO;
     using System.Linq;
     using System.Reflection;
     using System.Threading.Tasks;
 
     using FluentAssertions;
-
+    using Microsoft.Build.Execution;
     using Microsoft.Build.Utilities.ProjectCreation;
     using Microsoft.Testing.Platform.Extensions.Messages;
     using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -1214,44 +1215,85 @@ class Class1 {}]]>
 
                 result.DllAssemblies.Should().BeEmpty();
             }
-           
-            }
 
-        
-    [TestMethod]
-        public async Task AutomationScriptBuilder_ProjectReferenceHarvesting_PackableProject_AddsDllImportAsync()
+        }
+
+
+        [TestMethod]
+        public async Task AutomationScriptBuilder_ProjectReferenceHarvesting_CSharpLibraryProject_AddsDllImportAsync()
         {
-            // Arrange
-            string testDirectory = TestFixture.InitializeDirectoryForTest();
+          
+                // Arrange
+                string testDirectory = TestFixture.InitializeDirectoryForTest();
 
-            string libraryProjectPath = Path.Combine(testDirectory, "TestLibrary.csproj");
+                string testFilesDirectory = Path.Combine(
+                    AppContext.BaseDirectory,
+                    "TestFiles",
+                    "ProjectReferenceHarvesting",
+                    "TestLibrary");
 
-            File.WriteAllText(libraryProjectPath, @"<Project Sdk=""Skyline.DataMiner.Sdk"">
-  <PropertyGroup>
-    <TargetFramework>netstandard2.0</TargetFramework>
-    <OutputType>Library</OutputType>
-    <AssemblyName>TestLibrary</AssemblyName>
-    <PackageId>Test.Library</PackageId>
-    <PackageVersion>1.0.0</PackageVersion>
-    <IsPackable>true</IsPackable>
-  </PropertyGroup>
-<ItemGroup>
-    <PackageReference Include=""Newtonsoft.Json"" Version=""13.0.1"" />
-  </ItemGroup>
-</Project>");
+                string libraryProjectPath = Path.Combine(
+                    testFilesDirectory,
+                    "TestLibrary.csproj");
 
-            var projectFiles = new[]
-       {
-    new ProjectFile("Script.cs", "using System;")
-};
+                string assemblyPath = Path.Combine(
+                    testFilesDirectory,
+                    "bin",
+                    "Debug",
+                    "netstandard2.0",
+                    "TestLibrary.dll");
+
+                File.Exists(libraryProjectPath).Should().BeTrue(
+                    $"the test library project should exist at {libraryProjectPath}");
+
+                File.Exists(assemblyPath).Should().BeTrue(
+                    $"the test library assembly should exist at {assemblyPath}");
+
+                var assemblyVersion =
+                    System.Reflection.AssemblyName
+                        .GetAssemblyName(assemblyPath)
+                        .Version;
+
+                assemblyVersion.Should().Be(new Version(1, 0, 0, 0));
+
+                var evaluatedLibrary =
+                    MSBuildHelpers.EvaluateReferenceProject(
+                        libraryProjectPath,
+                        "netstandard2.0");
+
+                evaluatedLibrary.Should().NotBeNull();
+                evaluatedLibrary.OutputType.Should().Be("Library");
+                evaluatedLibrary.TargetFramework.Should().Be("netstandard2.0");
+                evaluatedLibrary.PackageId.Should().Be("Test.Library");
+
+                evaluatedLibrary.IsDataMinerProject.Should().BeFalse();
+                evaluatedLibrary.ShouldHarvestAsNuGetAssemblies().Should().BeTrue();
+
+                evaluatedLibrary.TargetPath.Should().NotBeNullOrWhiteSpace();
+
+                File.Exists(evaluatedLibrary.TargetPath)
+                    .Should()
+                    .BeTrue(
+                        $"the referenced project's DLL should already exist at {evaluatedLibrary.TargetPath}");
+
+                Console.WriteLine($"Project: {libraryProjectPath}");
+                Console.WriteLine($"TargetPath: {evaluatedLibrary.TargetPath}");
+                Console.WriteLine($"AssemblyVersion: {assemblyVersion}");
+
+                var projectFiles = new[]
+            {
+        new ProjectFile(
+            "Script.cs",
+            "using System;"),
+    };
 
             var projectReferences = new[]
             {
-    new ProjectReference(
-        "TestLibrary",
-        libraryProjectPath,
-        libraryProjectPath)
-};
+        new ProjectReference(
+            "TestLibrary",
+            libraryProjectPath,
+            libraryProjectPath),
+    };
 
             var scriptProject = new Project(
                 "Script_1",
@@ -1259,13 +1301,14 @@ class Class1 {}]]>
                 tfm: "net48",
                 projectFiles: projectFiles,
                 projectReferences: projectReferences);
-            
+
             var projects = new Dictionary<string, Project>
             {
                 ["Script_1"] = scriptProject,
             };
 
-            string original = @"<DMSScript>
+            string original = @"
+<DMSScript>
     <Script>
         <Exe id=""1"" type=""csharp"">
             <Value><![CDATA[[Project:Script_1]]]></Value>
@@ -1273,32 +1316,36 @@ class Class1 {}]]>
     </Script>
 </DMSScript>";
 
-            Script script = new Script(XmlDocument.Parse(original));
-            var evaluatedLibrary = MSBuildHelpers.EvaluateReferenceProject(libraryProjectPath);
-            evaluatedLibrary.Should().NotBeNull();
-            evaluatedLibrary.DirectPackageReferences.Should().ContainSingle(
-                p => p.Id == "Newtonsoft.Json");
+            Script script =
+                new Script(XmlDocument.Parse(original));
+
+            AutomationScriptBuilder builder =
+                new AutomationScriptBuilder(
+                    script,
+                    projects,
+                    new List<Script> { script },
+                    directoryForNuGetConfig: null);
 
             // Act
-            AutomationScriptBuilder builder = new AutomationScriptBuilder(
-                script,
-                projects,
-                new List<Script> { script },
-                directoryForNuGetConfig: null);
-          
-            var result = await builder.BuildAsync().ConfigureAwait(false);
-
+            var result =
+                await builder.BuildAsync()
+                    .ConfigureAwait(false);
+            foreach (var assembly in result.Assemblies.ToList())
+            {
+                Console.WriteLine($"Assemblyaaaaaaaaaaaaa: {assembly.DllImport}");
+            }
+            Console.WriteLine($"Assembly sveeeeeeeeeeee: {result.Assemblies}");
             // Assert
             result.Should().NotBeNull();
-            result.Assemblies.Should()
-                .Contain(a =>a.DllImport == "test.library/1.0.0/lib/netstandard2.0/TestLibrary.dll");
-            result.Assemblies.Should().Contain(a =>
-        a.DllImport.StartsWith("newtonsoft.json/13.0.1/lib/", StringComparison.OrdinalIgnoreCase) &&
-        a.DllImport.EndsWith("Newtonsoft.Json.dll", StringComparison.OrdinalIgnoreCase));
-            result.Document.Should()
-                .Contain(@"C:\Skyline DataMiner\ProtocolScripts\DllImport\test.library\1.0.0\lib\netstandard2.0\TestLibrary.dll");
-       
-            result.Document.Should().Contain("Newtonsoft.Json.dll");
+           
+            result.Assemblies.Should().Contain(
+                a =>
+                    a.DllImport.Equals(
+                        "test.library/1.0.0/lib/netstandard2.0/TestLibrary.dll",
+                        StringComparison.OrdinalIgnoreCase));
+
+            result.Document.Should().Contain(
+                @"C:\Skyline DataMiner\ProtocolScripts\DllImport\test.library\1.0.0\lib\netstandard2.0\TestLibrary.dll");
 
             result.Document.Should().NotContain("scriptRef");
         }

@@ -25,6 +25,8 @@ namespace Assemblers.AutomationTests
                 isPackable: true,
                 generatePackageOnBuild: false,
                 dataMinerType: "",
+                outputType: "Library",
+                assemblyVersion: "2.0.0",
                 directPackageReferences: new List<NuGet.Packaging.Core.PackageIdentity>());
             Assert.IsTrue(info.ShouldHarvestAsNuGetAssemblies());
         }
@@ -40,6 +42,8 @@ namespace Assemblers.AutomationTests
                 isPackable: true,
                 generatePackageOnBuild: true,
                 dataMinerType: "AutomationScript",
+                outputType: "Library",
+                assemblyVersion: "2.0.0",
                 directPackageReferences: new List<PackageIdentity>());
 
             Assert.IsFalse(info.ShouldHarvestAsNuGetAssemblies());
@@ -56,6 +60,8 @@ namespace Assemblers.AutomationTests
                 isPackable: true,
                 generatePackageOnBuild: false,
                 dataMinerType: "",
+                outputType: "Library",
+                assemblyVersion: "2.0.0",
                 directPackageReferences: new List<PackageIdentity>());
 
             var path = info.GetDllImportRelativePath();

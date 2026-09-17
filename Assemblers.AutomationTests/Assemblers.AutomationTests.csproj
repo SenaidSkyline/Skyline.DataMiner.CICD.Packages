@@ -36,5 +36,9 @@
     <!-- Ensures the SDK NuGet package is in the cache for test project evaluation -->
     <PackageDownload Include="Skyline.DataMiner.Sdk" Version="[2.5.2]" />
   </ItemGroup>
-
+  <ItemGroup>
+    <None Update="TestFiles\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
 </Project>
