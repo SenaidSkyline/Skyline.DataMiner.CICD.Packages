@@ -339,6 +339,7 @@
 
         private void CollectHarvestedReferencedProjects(Project project, List<ReferencedProjectInfo> harvestedReferencedProjects, HashSet<string> visitedProjectPaths)
         {
+           
             if (project?.ProjectReferences == null)
             {
                 return;
@@ -400,7 +401,7 @@
                     return false;
                 }
 
-                referencedProjectInfo = MSBuildHelpers.EvaluateReferenceProject(fullRefPath);
+                referencedProjectInfo = MSBuildHelpers.EvaluateReferenceProject(fullRefPath, project.TargetFrameworkMoniker);
                 if (referencedProjectInfo == null)
                 {
                     LogDebug($"TryGetReferencedProjectInfo|Referenced project file is invalid: {fullRefPath}");
@@ -416,7 +417,7 @@
             }
         }
 
-        public void ProcessLibAssemblies(EditXml.XmlElement editExe, BuildResultItems buildResultItems, NuGetPackageAssemblyData nugetAssemblyData)
+        private void ProcessLibAssemblies(EditXml.XmlElement editExe, BuildResultItems buildResultItems, NuGetPackageAssemblyData nugetAssemblyData)
         {
             HashSet<string> directoriesWithExplicitDllImport = new HashSet<string>();
             Dictionary<string, string> potentialRemainingDirectoryImports = new Dictionary<string, string>();
@@ -799,7 +800,7 @@
                         var fullRefPath = Path.IsPathRooted(prPath) ? prPath : Path.GetFullPath(Path.Combine(baseDir, prPath));
                         if (File.Exists(fullRefPath))
                         {
-                            var rinfo = MSBuildHelpers.EvaluateReferenceProject(fullRefPath);
+                            var rinfo = MSBuildHelpers.EvaluateReferenceProject(fullRefPath, project.TargetFrameworkMoniker);
                             if (rinfo != null && rinfo.ShouldHarvestAsNuGetAssemblies())
                             {
                                 LogDebug($"Skipping script-library handling for harvested referenced project: {fullRefPath}");

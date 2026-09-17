@@ -3,9 +3,12 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
+using Microsoft.Build.Construction;
 using Microsoft.Build.Evaluation;
+using NuGet.Frameworks;
 using NuGet.Packaging.Core;
 using NuGet.Versioning;
 using Skyline.DataMiner.CICD.Assemblers.Common;
@@ -21,15 +24,20 @@ namespace Skyline.DataMiner.CICD.Assemblers.Automation
         /// Evaluates a referenced project and returns information about it.
         /// </summary>
         /// <param name="referencedProjectFullPath">The full path to the referenced project file.</param>
+        /// <param name="singleTargetFramework">The target framework to evaluate.</param>
         /// <returns>The evaluated project information, or null if the project is invalid.</returns>
-        public static ReferencedProjectInfo EvaluateReferenceProject(string referencedProjectFullPath)
+        public static ReferencedProjectInfo EvaluateReferenceProject(string referencedProjectFullPath, string singleTargetFramework)
         {
             if (string.IsNullOrWhiteSpace(referencedProjectFullPath))
                 return null;
 
              var pc = new ProjectCollection();
             pc.DisableMarkDirty = true;
-            var msproj = pc.LoadProject(referencedProjectFullPath);
+            var snglTargetFramework = singleTargetFramework;
+            var msproj = pc.LoadProject(referencedProjectFullPath, new Dictionary<string, string>
+            {
+                ["TargetFramework"] = snglTargetFramework
+            }, null);
             string Get(string name) => msproj.GetPropertyValue(name) ?? string.Empty;
 
             var packageId = Get("PackageId");
@@ -39,7 +47,7 @@ namespace Skyline.DataMiner.CICD.Assemblers.Automation
             }
 
             var packageVersion = Get("PackageVersion");
-            var targetFramework = string.IsNullOrWhiteSpace(Get("TargetFramework")) ? Get("TargetFrameworks") : Get("TargetFramework");
+            var targetFramework = singleTargetFramework;
 
             var targetPath = Get("TargetPath");
             if (string.IsNullOrWhiteSpace(targetPath))
@@ -52,6 +60,15 @@ namespace Skyline.DataMiner.CICD.Assemblers.Automation
                     targetPath=Path.Combine(targetDir, assemblyNameFile);
                 }
             }
+            string assemblyVersion = string.Empty;
+
+            if (!string.IsNullOrWhiteSpace(targetPath) && File.Exists(targetPath))
+            {
+                assemblyVersion = AssemblyName
+                    .GetAssemblyName(targetPath)
+                    .Version?
+                    .ToString() ?? string.Empty;
+            }
             bool isCpm = string.Equals(Get("ManagePackageVersionsCentrally"), "true", StringComparison.OrdinalIgnoreCase);
             Dictionary<string, string> centralVersions = null;
             if (isCpm)
@@ -60,31 +77,72 @@ namespace Skyline.DataMiner.CICD.Assemblers.Automation
                     .ToDictionary(i => i.EvaluatedInclude, i => i.GetMetadataValue("Version"), StringComparer.OrdinalIgnoreCase);
             }
             var directPackages = new List<PackageIdentity>();
-            foreach (var item in msproj.GetItems("PackageReference"))
-                {
-                var id= item.EvaluatedInclude;
-                var version = item.GetMetadataValue("Version");
-                if(isCpm && string.IsNullOrWhiteSpace(version))
-                {
-                    var versionOverride = item.GetMetadataValue("VersionOverride");
-                    if(!string.IsNullOrWhiteSpace(versionOverride))
-                    {
-                        version = versionOverride;
-                    }
-                    else if (centralVersions != null && centralVersions.TryGetValue(id, out var centralVersion))
-                    {
-                        version = centralVersion;
-                    }
-                }
-                if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(version)) continue;
-                if(!NuGetVersion.TryParse(version, out var nv)) nv= NuGetVersion.Parse(version);
-                directPackages.Add(new PackageIdentity(id, nv));
+            //ovdje
+            var projectRoot = ProjectRootElement.Open(referencedProjectFullPath);
 
+            foreach (var itemGroup in projectRoot.ItemGroups)
+            {
+                foreach (var item in itemGroup.Items)
+                {
+                    if (!string.Equals(
+                            item.ItemType,
+                            "PackageReference",
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    var id = item.Include;
+                    var version = item.Metadata
+                        .FirstOrDefault(m =>
+                            string.Equals(m.Name, "Version", StringComparison.OrdinalIgnoreCase))
+                        ?.Value;
+
+                    if (string.IsNullOrWhiteSpace(id))
+                    {
+                        continue;
+                    }
+
+                    // CPM / VersionOverride ćemo obraditi poslije
+                    if (string.IsNullOrWhiteSpace(version))
+                    {
+                        continue;
+                    }
+
+                    if (!NuGetVersion.TryParse(version, out var nugetVersion))
+                    {
+                        continue;
+                    }
+
+                    directPackages.Add(new PackageIdentity(id, nugetVersion));
+                }
             }
+            //ovdje
+            //foreach (var item in msproj.GetItems("PackageReference"))
+            //    {
+            //    var id= item.EvaluatedInclude;
+            //    var version = item.GetMetadataValue("Version");
+            //    if(isCpm && string.IsNullOrWhiteSpace(version))
+            //    {
+            //        var versionOverride = item.GetMetadataValue("VersionOverride");
+            //        if(!string.IsNullOrWhiteSpace(versionOverride))
+            //        {
+            //            version = versionOverride;
+            //        }
+            //        else if (centralVersions != null && centralVersions.TryGetValue(id, out var centralVersion))
+            //        {
+            //            version = centralVersion;
+            //        }
+            //    }
+            //    if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(version)) continue;
+            //    if(!NuGetVersion.TryParse(version, out var nv)) nv= NuGetVersion.Parse(version);
+            //    directPackages.Add(new PackageIdentity(id, nv));
+
+            //}
             bool isPackable = bool.TryParse(Get("IsPackable"), out var isPackableValue) && isPackableValue;
             bool genPkgOnBuild = bool.TryParse(Get("GeneratePackageOnBuild"), out var gp) && gp;
             string isDataMiner = Get("DataMinerType");
-
+            var outputType = Get("OutputType");
             return new ReferencedProjectInfo(
                 projectPath: Path.GetFullPath(referencedProjectFullPath),
                 packageId: packageId,
@@ -94,7 +152,9 @@ namespace Skyline.DataMiner.CICD.Assemblers.Automation
                 assemblyName: Get("AssemblyName"),
                 dataMinerType: isDataMiner,
                 isPackable: isPackable,
+                outputType: outputType,
                 generatePackageOnBuild: genPkgOnBuild,
+                assemblyVersion: assemblyVersion,
                 directPackageReferences: directPackages);
         }
         /// <summary>
