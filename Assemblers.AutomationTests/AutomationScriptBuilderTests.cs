@@ -11,6 +11,8 @@
     using FluentAssertions;
     using Microsoft.Build.Execution;
     using Microsoft.Build.Utilities.ProjectCreation;
+    
+
     using Microsoft.Testing.Platform.Extensions.Messages;
     using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -1085,62 +1087,7 @@ class Class1 {}]]>
 
             result.DllAssemblies.Should().BeEmpty();
         }
-        [TestMethod]
-        public async Task AutomationScriptBuilder_Harvests_QAOpsApiProjects()
-        {
-            // Arrange
-            string projectPath = @"C:\Users\SenaidVD\Desktop\Skyline-QAOps\Skyline-QAOps-SendTokenDeletionRequest\Skyline-QAOps-SendTokenDeletionRequest.csproj";
-
-            Project project = Project.Load(projectPath);
-
-            var projects = new Dictionary<string, Project>
-    {
-        { project.ProjectName, project }
-    };
-
-            string original = $@"<DMSScript>
-    <Script>
-        <Exe id=""1"" type=""csharp"">
-            <Value><![CDATA[[Project:{project.ProjectName}]]]></Value>
-        </Exe>
-    </Script>
-</DMSScript>";
-
-            Script script = new Script(XmlDocument.Parse(original));
-
-            var builder = new AutomationScriptBuilder(
-                script,
-                projects,
-                new List<Script> { script },
-                directoryForNuGetConfig: null);
-
-            // Act
-            var result = await builder.BuildAsync().ConfigureAwait(false);
-
-            File.WriteAllText(
-    @"C:\Users\SenaidVD\Desktop\qaops-generated.xml",
-    result.Document);
-
-            // Assert
-            result.Document.Should().Contain("Skyline.DataMiner.QAOps.Api.dll");
-            result.Document.Should().Contain("Skyline.DataMiner.QAOps.Api.Common.dll");
-            Console.WriteLine("=== ASSEMBLIES ===");
-            foreach (var assembly in result.Assemblies)
-            {
-                Console.WriteLine($"DllImport: {assembly.DllImport}");
-                Console.WriteLine($"AssemblyPath: {assembly.AssemblyPath}");
-            }
-
-            result.Assemblies.Should().Contain(x =>
-                x.AssemblyPath.EndsWith(
-                    "Skyline.DataMiner.QAOps.Api.dll",
-                    StringComparison.OrdinalIgnoreCase));
-
-            result.Assemblies.Should().Contain(x =>
-                x.AssemblyPath.EndsWith(
-                    "Skyline.DataMiner.QAOps.Api.Common.dll",
-                    StringComparison.OrdinalIgnoreCase));
-        }
+        
         [TestMethod]
         public async Task AutomationScriptBuilder_DataMinerSolutionId_AllScriptsShouldHaveSameNuGetVersion()
         {
@@ -1222,70 +1169,67 @@ class Class1 {}]]>
         [TestMethod]
         public async Task AutomationScriptBuilder_ProjectReferenceHarvesting_CSharpLibraryProject_AddsDllImportAsync()
         {
-          
-                // Arrange
-                string testDirectory = TestFixture.InitializeDirectoryForTest();
 
-                string testFilesDirectory = Path.Combine(
-                    AppContext.BaseDirectory,
-                    "TestFiles",
-                    "ProjectReferenceHarvesting",
-                    "TestLibrary");
+            // Arrange
+            string testDirectory = TestFixture.InitializeDirectoryForTest();
 
-                string libraryProjectPath = Path.Combine(
-                    testFilesDirectory,
-                    "TestLibrary.csproj");
+            string testFilesDirectory = Path.Combine(
+                AppContext.BaseDirectory,
+                "TestFiles",
+                "ProjectReferenceHarvesting",
+                "TestLibrary");
 
-                string assemblyPath = Path.Combine(
-                    testFilesDirectory,
-                    "bin",
-                    "Debug",
-                    "netstandard2.0",
-                    "TestLibrary.dll");
+            string libraryProjectPath = Path.Combine(
+                testFilesDirectory,
+                "TestLibrary.csproj");
 
-                File.Exists(libraryProjectPath).Should().BeTrue(
-                    $"the test library project should exist at {libraryProjectPath}");
+            string assemblyPath = Path.Combine(
+                testFilesDirectory,
+                "bin",
+                "Debug",
+                "netstandard2.0",
+                "TestLibrary.dll");
 
-                File.Exists(assemblyPath).Should().BeTrue(
-                    $"the test library assembly should exist at {assemblyPath}");
+            File.Exists(libraryProjectPath).Should().BeTrue(
+                $"the test library project should exist at {libraryProjectPath}");
 
-                var assemblyVersion =
-                    System.Reflection.AssemblyName
-                        .GetAssemblyName(assemblyPath)
-                        .Version;
+            File.Exists(assemblyPath).Should().BeTrue(
+                $"the test library assembly should exist at {assemblyPath}");
 
-                assemblyVersion.Should().Be(new Version(1, 0, 0, 0));
+            var assemblyVersion =
+                System.Reflection.AssemblyName
+                    .GetAssemblyName(assemblyPath)
+                    .Version;
 
-                var evaluatedLibrary =
-                    MSBuildHelpers.EvaluateReferenceProject(
-                        libraryProjectPath,
-                        "netstandard2.0");
+        
 
-                evaluatedLibrary.Should().NotBeNull();
-                evaluatedLibrary.OutputType.Should().Be("Library");
-                evaluatedLibrary.TargetFramework.Should().Be("netstandard2.0");
-                evaluatedLibrary.PackageId.Should().Be("Test.Library");
+            var evaluatedLibrary =
+                MSBuildHelpers.EvaluateReferenceProject(
+                    libraryProjectPath,
+                    "netstandard2.0");
 
-                evaluatedLibrary.IsDataMinerProject.Should().BeFalse();
-                evaluatedLibrary.ShouldHarvestAsNuGetAssemblies().Should().BeTrue();
+            evaluatedLibrary.Should().NotBeNull();
+            evaluatedLibrary.OutputType.Should().Be("Library");
+            evaluatedLibrary.TargetFramework.Should().Be("netstandard2.0");
+            evaluatedLibrary.PackageId.Should().Be("Test.Library");
 
-                evaluatedLibrary.TargetPath.Should().NotBeNullOrWhiteSpace();
+            evaluatedLibrary.IsDataMinerProject.Should().BeFalse();
+            evaluatedLibrary.ShouldHarvestAsNuGetAssemblies().Should().BeTrue();
 
-                File.Exists(evaluatedLibrary.TargetPath)
-                    .Should()
-                    .BeTrue(
-                        $"the referenced project's DLL should already exist at {evaluatedLibrary.TargetPath}");
+            evaluatedLibrary.TargetPath.Should().NotBeNullOrWhiteSpace();
 
-                Console.WriteLine($"Project: {libraryProjectPath}");
-                Console.WriteLine($"TargetPath: {evaluatedLibrary.TargetPath}");
-                Console.WriteLine($"AssemblyVersion: {assemblyVersion}");
+            File.Exists(evaluatedLibrary.TargetPath)
+                .Should()
+                .BeTrue(
+                    $"the referenced project's DLL should already exist at {evaluatedLibrary.TargetPath}");
 
-                var projectFiles = new[]
-            {
+            var projectFiles = new[]
+        {
         new ProjectFile(
             "Script.cs",
             "using System;"),
     };
+
 
             var projectReferences = new[]
             {
@@ -1330,24 +1274,380 @@ class Class1 {}]]>
             var result =
                 await builder.BuildAsync()
                     .ConfigureAwait(false);
-            foreach (var assembly in result.Assemblies.ToList())
-            {
-                Console.WriteLine($"Assemblyaaaaaaaaaaaaa: {assembly.DllImport}");
-            }
-            Console.WriteLine($"Assembly sveeeeeeeeeeee: {result.Assemblies}");
+
+
+
+
             // Assert
             result.Should().NotBeNull();
-           
+
             result.Assemblies.Should().Contain(
                 a =>
                     a.DllImport.Equals(
-                        "test.library/1.0.0/lib/netstandard2.0/TestLibrary.dll",
+                        "test.library/7.8.9.0/lib/netstandard2.0/TestLibrary.dll",
                         StringComparison.OrdinalIgnoreCase));
 
             result.Document.Should().Contain(
-                @"C:\Skyline DataMiner\ProtocolScripts\DllImport\test.library\1.0.0\lib\netstandard2.0\TestLibrary.dll");
+                @"C:\Skyline DataMiner\ProtocolScripts\DllImport\test.library\7.8.9.0\lib\netstandard2.0\TestLibrary.dll");
+
+            result.Document.Should().NotContain("scriptRef");
+            evaluatedLibrary.PackageVersion.Should().Be("2.3.4");
+            evaluatedLibrary.AssemblyVersion.Should().Be("7.8.9.0");
+        }
+        [TestMethod]
+        public void EvaluateReferenceProject_MultiTargetProject_NetStandard_SelectsNetStandardOutput()
+        {
+            string testFilesDirectory = Path.Combine(
+                AppContext.BaseDirectory,
+                "TestFiles",
+                "ProjectReferenceHarvesting",
+                "MultiTargetLibrary");
+
+            string projectPath = Path.Combine(
+                testFilesDirectory,
+                "MultiTargetLibrary.csproj");
+
+            var evaluatedProject =
+                MSBuildHelpers.EvaluateReferenceProject(
+                    projectPath,
+                    "netstandard2.0");
+
+            evaluatedProject.Should().NotBeNull();
+            evaluatedProject.TargetFramework.Should().Be("netstandard2.0");
+            evaluatedProject.TargetPath.Should().NotBeNullOrWhiteSpace();
+
+            evaluatedProject.TargetPath.Should().Contain(
+                Path.Combine("bin", "Debug", "netstandard2.0"));
+
+            File.Exists(evaluatedProject.TargetPath)
+                .Should()
+                .BeTrue();
+        }
+        [TestMethod]
+        public void EvaluateReferenceProject_MultiTargetProject_Net48_SelectsNet48Output()
+        {
+            string testFilesDirectory = Path.Combine(
+                AppContext.BaseDirectory,
+                "TestFiles",
+                "ProjectReferenceHarvesting",
+                "MultiTargetLibrary");
+
+            string projectPath = Path.Combine(
+                testFilesDirectory,
+                "MultiTargetLibrary.csproj");
+
+            var evaluatedProject =
+                MSBuildHelpers.EvaluateReferenceProject(
+                    projectPath,
+                    "net48");
+
+            evaluatedProject.Should().NotBeNull();
+            evaluatedProject.TargetFramework.Should().Be("net48");
+            evaluatedProject.TargetPath.Should().NotBeNullOrWhiteSpace();
+
+            evaluatedProject.TargetPath.Should().Contain(
+                Path.Combine("bin", "Debug", "net48"));
+
+            File.Exists(evaluatedProject.TargetPath)
+                .Should()
+                .BeTrue();
+        }
+        [TestMethod]
+        public async Task AutomationScriptBuilder_ProjectReferenceHarvesting_MultiTargetLibrary_Net48_SelectsNet48OutputAsync()
+        {
+            // Arrange
+            string testDirectory = TestFixture.InitializeDirectoryForTest();
+
+            string testFilesDirectory = Path.Combine(
+                AppContext.BaseDirectory,
+                "TestFiles",
+                "ProjectReferenceHarvesting",
+                "MultiTargetLibrary");
+
+            string libraryProjectPath = Path.Combine(
+                testFilesDirectory,
+                "MultiTargetLibrary.csproj");
+
+            string net48AssemblyPath = Path.Combine(
+                testFilesDirectory,
+                "bin",
+                "Debug",
+                "net48",
+                "MultiTargetLibrary.dll");
+
+            File.Exists(libraryProjectPath).Should().BeTrue(
+                $"the multi-target library project should exist at {libraryProjectPath}");
+
+            File.Exists(net48AssemblyPath).Should().BeTrue(
+                $"the net48 assembly should exist at {net48AssemblyPath}");
+
+            var net48AssemblyVersion =
+                System.Reflection.AssemblyName
+                    .GetAssemblyName(net48AssemblyPath)
+                    .Version;
+
+            var projectFiles = new[]
+            {
+        new ProjectFile(
+            "Script.cs",
+            "using System;"),
+    };
+
+            var projectReferences = new[]
+            {
+        new ProjectReference(
+            "MultiTargetLibrary",
+            libraryProjectPath,
+            libraryProjectPath),
+    };
+
+            var scriptProject = new Project(
+                "Script_1",
+                path: Path.Combine(testDirectory, "Script_1.csproj"),
+                tfm: "net48",
+                projectFiles: projectFiles,
+                projectReferences: projectReferences);
+
+            var projects = new Dictionary<string, Project>
+            {
+                ["Script_1"] = scriptProject,
+            };
+
+            string original = @"
+<DMSScript>
+    <Script>
+        <Exe id=""1"" type=""csharp"">
+            <Value><![CDATA[[Project:Script_1]]]></Value>
+        </Exe>
+    </Script>
+</DMSScript>";
+
+            Script script =
+                new Script(XmlDocument.Parse(original));
+
+            AutomationScriptBuilder builder =
+                new AutomationScriptBuilder(
+                    script,
+                    projects,
+                    new List<Script> { script },
+                    directoryForNuGetConfig: null);
+
+            // Act
+            var result =
+                await builder.BuildAsync()
+                    .ConfigureAwait(false);
+
+            // Assert
+            result.Should().NotBeNull();
+
+            string expectedDllImport =
+                $"multitargetlibrary/{net48AssemblyVersion}/lib/net48/MultiTargetLibrary.dll";
+
+            result.Assemblies.Should().Contain(
+                a =>
+                    a.DllImport.Equals(
+                        expectedDllImport,
+                        StringComparison.OrdinalIgnoreCase));
+
+            result.Assemblies.Should().Contain(
+                a =>
+                    Path.GetFullPath(a.AssemblyPath)
+                        .Equals(
+                            Path.GetFullPath(net48AssemblyPath),
+                            StringComparison.OrdinalIgnoreCase));
+
+            result.Document.Should().Contain(
+                $@"C:\Skyline DataMiner\ProtocolScripts\DllImport\multitargetlibrary\{net48AssemblyVersion}\lib\net48\MultiTargetLibrary.dll");
+
+            result.Document.Should().NotContain("scriptRef");
+        }
+        [TestMethod]
+        public async Task AutomationScriptBuilder_ProjectReferenceHarvesting_RecursiveReferences_PropagatesSelectedTargetFrameworkAsync()
+        {
+            // Arrange
+            string testDirectory =
+                TestFixture.InitializeDirectoryForTest();
+
+            string projectReferenceHarvestingDirectory = Path.Combine(
+                AppContext.BaseDirectory,
+                "TestFiles",
+                "ProjectReferenceHarvesting");
+
+            string libraryAProjectPath = Path.Combine(
+                projectReferenceHarvestingDirectory,
+                "RecursiveLibraryA",
+                "RecursiveLibraryA.csproj");
+
+            string libraryAAssemblyPath = Path.Combine(
+                projectReferenceHarvestingDirectory,
+                "RecursiveLibraryA",
+                "bin",
+                "Debug",
+                "netstandard2.0",
+                "RecursiveLibraryA.dll");
+
+            string libraryBProjectPath = Path.Combine(
+                projectReferenceHarvestingDirectory,
+                "MultiTargetLibrary",
+                "MultiTargetLibrary.csproj");
+
+            string libraryBNetStandardAssemblyPath = Path.Combine(
+                projectReferenceHarvestingDirectory,
+                "MultiTargetLibrary",
+                "bin",
+                "Debug",
+                "netstandard2.0",
+                "MultiTargetLibrary.dll");
+
+            string libraryBNet48AssemblyPath = Path.Combine(
+                projectReferenceHarvestingDirectory,
+                "MultiTargetLibrary",
+                "bin",
+                "Debug",
+                "net48",
+                "MultiTargetLibrary.dll");
+
+            File.Exists(libraryAProjectPath)
+                .Should()
+                .BeTrue(
+                    $"LibraryA project should exist at {libraryAProjectPath}");
+
+            File.Exists(libraryAAssemblyPath)
+                .Should()
+                .BeTrue(
+                    $"LibraryA assembly should exist at {libraryAAssemblyPath}");
+
+            File.Exists(libraryBProjectPath)
+                .Should()
+                .BeTrue(
+                    $"LibraryB project should exist at {libraryBProjectPath}");
+
+            File.Exists(libraryBNetStandardAssemblyPath)
+                .Should()
+                .BeTrue(
+                    $"LibraryB netstandard2.0 assembly should exist at {libraryBNetStandardAssemblyPath}");
+
+            File.Exists(libraryBNet48AssemblyPath)
+                .Should()
+                .BeTrue(
+                    $"LibraryB net48 assembly should exist at {libraryBNet48AssemblyPath}");
+
+            var libraryAAssemblyVersion =
+                AssemblyName
+                    .GetAssemblyName(libraryAAssemblyPath)
+                    .Version;
+
+            var libraryBNetStandardAssemblyVersion =
+                AssemblyName
+                    .GetAssemblyName(libraryBNetStandardAssemblyPath)
+                    .Version;
+
+            var projectFiles = new[]
+            {
+        new ProjectFile(
+            "Script.cs",
+            "using System;"),
+    };
+
+            var projectReferences = new[]
+            {
+        new ProjectReference(
+            "RecursiveLibraryA",
+            libraryAProjectPath,
+            libraryAProjectPath),
+    };
+
+            // Root Automation project targets net48.
+            var scriptProject = new Project(
+                "Script_1",
+                path: Path.Combine(
+                    testDirectory,
+                    "Script_1.csproj"),
+                tfm: "net48",
+                projectFiles: projectFiles,
+                projectReferences: projectReferences);
+
+            var projects = new Dictionary<string, Project>
+            {
+                ["Script_1"] = scriptProject,
+            };
+
+            string original = @"
+<DMSScript>
+    <Script>
+        <Exe id=""1"" type=""csharp"">
+            <Value><![CDATA[[Project:Script_1]]]></Value>
+        </Exe>
+    </Script>
+</DMSScript>";
+
+            Script script =
+                new Script(
+                    XmlDocument.Parse(original));
+
+            AutomationScriptBuilder builder =
+                new AutomationScriptBuilder(
+                    script,
+                    projects,
+                    new List<Script> { script },
+                    directoryForNuGetConfig: null);
+
+            // Act
+            var result =
+                await builder
+                    .BuildAsync()
+                    .ConfigureAwait(false);
+
+            // Assert
+            result.Should().NotBeNull();
+
+            string expectedLibraryADllImport =
+                $"recursive.librarya/{libraryAAssemblyVersion}/lib/netstandard2.0/RecursiveLibraryA.dll";
+
+            string expectedLibraryBDllImport =
+                $"multitargetlibrary/{libraryBNetStandardAssemblyVersion}/lib/netstandard2.0/MultiTargetLibrary.dll";
+
+            // LibraryA must be harvested as netstandard2.0,
+            // even though the root Automation project targets net48.
+            result.Assemblies.Should().Contain(
+                a =>
+                    a.DllImport.Equals(
+                        expectedLibraryADllImport,
+                        StringComparison.OrdinalIgnoreCase));
+
+            // LibraryB must receive LibraryA's selected TFM:
+            // netstandard2.0, not the root net48.
+            result.Assemblies.Should().Contain(
+                a =>
+                    a.DllImport.Equals(
+                        expectedLibraryBDllImport,
+                        StringComparison.OrdinalIgnoreCase));
+
+            // Also verify that the actual physical B assembly came
+            // from the netstandard2.0 output.
+            result.Assemblies.Should().Contain(
+                a =>
+                    Path.GetFullPath(a.AssemblyPath)
+                        .Equals(
+                            Path.GetFullPath(libraryBNetStandardAssemblyPath),
+                            StringComparison.OrdinalIgnoreCase));
+
+            // This is the important regression assertion:
+            // recursive harvesting must NOT jump back to the root net48 TFM.
+            result.Assemblies.Should().NotContain(
+                a =>
+                    a.DllImport.Contains(
+                        "/lib/net48/MultiTargetLibrary.dll"));
+
+            result.Document.Should().Contain(
+                $@"C:\Skyline DataMiner\ProtocolScripts\DllImport\recursive.librarya\{libraryAAssemblyVersion}\lib\netstandard2.0\RecursiveLibraryA.dll");
+
+            result.Document.Should().Contain(
+                $@"C:\Skyline DataMiner\ProtocolScripts\DllImport\multitargetlibrary\{libraryBNetStandardAssemblyVersion}\lib\netstandard2.0\MultiTargetLibrary.dll");
 
             result.Document.Should().NotContain("scriptRef");
         }
     }
 }
+   
+    
