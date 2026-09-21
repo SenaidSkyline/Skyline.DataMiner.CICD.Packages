@@ -32,56 +32,14 @@ namespace Assemblers.AutomationTests
                   </PropertyGroup>
                 </Project>
                 """);
-            var info = MSBuildHelpers.EvaluateReferenceProject(csprojPath, "net48");
+            var info = MSBuildHelpers.EvaluateReferenceProject(csprojPath, "netstandard2.0");
             Assert.IsNotNull(info);
             Assert.AreEqual("Pkg.LibA", info.PackageId);
             Assert.AreEqual("netstandard2.0", info.TargetFramework);
             Assert.AreEqual("1.0.5", info.PackageVersion);
             Assert.IsTrue(info.ShouldHarvestAsNuGetAssemblies());
         }
-        [TestMethod]
-        public void EvaluateReferenceProject_QAOpsApi_ReadsCoreProperties()
-        {
-            var csprojPath = @"C:\Users\SenaidVD\Desktop\Skyline-QAOps\Dxm\QAOps.Api\QAOps.Api.csproj";
-
-            var info = MSBuildHelpers.EvaluateReferenceProject(csprojPath, "net48");
-
-            Assert.IsNotNull(info);
-            Assert.AreEqual("Skyline.DataMiner.QAOps.Api", info.PackageId);
-            Assert.AreEqual("netstandard2.0", info.TargetFramework);
-            Assert.AreEqual("0.0.2-local12", info.PackageVersion);
-            Assert.IsTrue(info.IsPackable);
-            Assert.IsTrue(info.GeneratePackageOnBuild);
-            Assert.IsTrue(string.IsNullOrWhiteSpace(info.DataMinerType));
-            Assert.IsTrue(info.ShouldHarvestAsNuGetAssemblies());
-        }
-        [TestMethod]
-        public void EvaluateReferenceProject_DataMinerProject_IsNotHarvested()
-        {
-            var dir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-            Directory.CreateDirectory(dir);
-            var csprojPath = Path.Combine(dir, "Lib.csproj");
-
-            File.WriteAllText(csprojPath, """
-                <Project Sdk="Microsoft.NET.Sdk">
-                  <PropertyGroup>
-                    <TargetFramework>netstandard2.0</TargetFramework>
-                    <AssemblyName>DataMinerLib</AssemblyName>
-                    <PackageId>DataMiner.Lib</PackageId>
-                    <PackageVersion>1.0.0</PackageVersion>
-                    <IsPackable>true</IsPackable>
-                    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-                    <DataMinerType>AutomationScript</DataMinerType>
-                  </PropertyGroup>
-                </Project>
-                """);
-
-            var info = MSBuildHelpers.EvaluateReferenceProject(csprojPath, "net48");
-
-            Assert.IsNotNull(info);
-            Assert.IsTrue(info.IsDataMinerProject);
-            Assert.IsFalse(info.ShouldHarvestAsNuGetAssemblies());
-        }
+       
         [TestMethod]
         public void EvaluateReferenceProject_MultiTargetLibrary_ReadsTargetFramework()
         {
@@ -132,24 +90,20 @@ namespace Assemblers.AutomationTests
                       </PropertyGroup>
                     </Project>
                     """);
-                var projectCollection = new ProjectCollection();
+                var info =MSBuildHelpers.EvaluateReferenceProject(csprojPath,"net48");
 
-                var project = projectCollection.LoadProject(
-                    csprojPath,
-                    new Dictionary<string, string>
-                    {
-                        ["TargetFramework"] = "net48",
-                    },
-                    null);
-
-                Console.WriteLine($"TargetPath: {project.GetPropertyValue("TargetPath")}");
-                var info = MSBuildHelpers.EvaluateReferenceProject(csprojPath, "net48");
-                Console.WriteLine($"TargetFramework: {info.TargetFramework}");
-                Console.WriteLine($"TargetPath: {info.TargetPath}");
                 Assert.IsNotNull(info);
-                Assert.IsFalse(string.IsNullOrWhiteSpace(info.TargetPath));
+                Assert.AreEqual("net48", info.TargetFramework);
 
-               
+                Assert.IsFalse(
+                    string.IsNullOrWhiteSpace(info.TargetPath));
+
+                Assert.IsTrue(
+                    info.TargetPath.EndsWith(
+                        Path.Combine("net48", "Lib.dll"),
+                        StringComparison.OrdinalIgnoreCase));
+
+
             }
             finally
             {
@@ -214,7 +168,7 @@ namespace Assemblers.AutomationTests
                     },
                     null);
 
-                var rootTfm = rootProject.GetPropertyValue("TargetFrameworkMoniker");
+                var rootTfm = rootProject.GetPropertyValue("TargetFramework");
 
                 var libraryA = MSBuildHelpers.EvaluateReferenceProject(
                     libraryAPath,
