@@ -36,6 +36,7 @@
         private readonly IFileSystem _fileSystem = FileSystem.Instance;
         private readonly ILogCollector logCollector;
         private readonly string directoryForNuGetConfig;
+        private const int MaxReferenceRecursionDepth = 100;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="AutomationScriptBuilder"/> class.
@@ -238,7 +239,7 @@
 
             // PackageReferences (NuGet packages)
             var harvestedReferencedProjects = GetHarvestedReferencedProjects(project);
-
+          
             var packageIdentities = project.PackageReferences != null ? GetPackageIdentities(project.PackageReferences) : new List<PackageIdentity>();
             foreach (var hrp in harvestedReferencedProjects)
             {
@@ -248,6 +249,8 @@
                         packageIdentities.Add(dpr);
                 }
             }
+         
+         
             nugetAssemblyData = await ProcessPackageReferences(editExe, project, packageReferenceProcessor, buildResultItems, packageIdentities).ConfigureAwait(false);
             if (nugetAssemblyData == null)
             {
@@ -257,11 +260,15 @@
             {
                 try
                 {
+                   
                     var synthetic = MSBuildHelpers.CreateSyntheticPackageAssembyReference(hrp);
+                  
+
                     if (synthetic == null)
                     {
                         continue;
                     }
+                    
                     if (!nugetAssemblyData.DllImportNugetAssemblyReferences.Any(x =>
                     String.Equals(x.DllImport, synthetic.DllImport, StringComparison.OrdinalIgnoreCase) &&
                     String.Equals(x.AssemblyPath, synthetic.AssemblyPath, StringComparison.OrdinalIgnoreCase)))
@@ -281,6 +288,8 @@
                     LogDebug($"BuildDllImportsAsync|Error creating synthetic package assembly reference for referenced project: {hrp.ProjectPath}|Error: {ex.Message}");
                 }
             }
+           
+            
             if (project.References != null)
             {
                 ProcessReferences(editExe, project, nugetAssemblyData, packageReferenceProcessor, buildResultItems);
@@ -329,32 +338,40 @@
 
         private List<ReferencedProjectInfo> GetHarvestedReferencedProjects(Project project)
         {
+           
             var harvestedReferencedProjects = new List<ReferencedProjectInfo>();
             var visitedProjectPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            CollectHarvestedReferencedProjects(project, harvestedReferencedProjects, visitedProjectPaths);
+            CollectHarvestedReferencedProjects(project, harvestedReferencedProjects, visitedProjectPaths, project.TargetFrameworkMoniker, 0);
 
             return harvestedReferencedProjects;
         }
 
-        private void CollectHarvestedReferencedProjects(Project project, List<ReferencedProjectInfo> harvestedReferencedProjects, HashSet<string> visitedProjectPaths)
+        private void CollectHarvestedReferencedProjects(Project project, List<ReferencedProjectInfo> harvestedReferencedProjects, HashSet<string> visitedProjectPaths, string requestedTargetFramework, int depth)
         {
+            if (depth >= MaxReferenceRecursionDepth)
+            {
+                return;
+            }
+
             if (project?.ProjectReferences == null)
             {
                 return;
             }
+           
             foreach (var pr in project.ProjectReferences)
             {
-                if (!TryGetReferencedProjectInfo(project, pr, out var referencedProjectInfo))
+             
+                if (!TryGetReferencedProjectInfo(project, pr, requestedTargetFramework, out var referencedProjectInfo))
                 {
                     continue;
                 }
-
+              
                 if (!referencedProjectInfo.ShouldHarvestAsNuGetAssemblies())
                 {
                     continue;
                 }
-
+                
                 if (!harvestedReferencedProjects.Any(x => String.Equals(x.ProjectPath, referencedProjectInfo.ProjectPath, StringComparison.OrdinalIgnoreCase)))
                 {
                     harvestedReferencedProjects.Add(referencedProjectInfo);
@@ -368,7 +385,7 @@
                 {
                     var referencedProject = Project.Load(referencedProjectInfo.ProjectPath);
                     //recursively collect harvested referenced projects for the referenced project
-                    CollectHarvestedReferencedProjects(referencedProject, harvestedReferencedProjects, visitedProjectPaths);
+                    CollectHarvestedReferencedProjects(referencedProject, harvestedReferencedProjects, visitedProjectPaths,referencedProjectInfo.TargetFramework, depth + 1);
                 }
                 catch (Exception ex)
                 {
@@ -377,7 +394,7 @@
             }
         }
 
-        private bool TryGetReferencedProjectInfo(Project project, ProjectReference pr, out ReferencedProjectInfo referencedProjectInfo)
+        private bool TryGetReferencedProjectInfo(Project project, ProjectReference pr, string requestedTargetFramework, out ReferencedProjectInfo referencedProjectInfo)
         {
             referencedProjectInfo = null;
 
@@ -400,7 +417,7 @@
                     return false;
                 }
 
-                referencedProjectInfo = MSBuildHelpers.EvaluateReferenceProject(fullRefPath);
+                referencedProjectInfo = MSBuildHelpers.EvaluateReferenceProject(fullRefPath, project.TargetFrameworkMoniker);
                 if (referencedProjectInfo == null)
                 {
                     LogDebug($"TryGetReferencedProjectInfo|Referenced project file is invalid: {fullRefPath}");
@@ -416,7 +433,7 @@
             }
         }
 
-        public void ProcessLibAssemblies(EditXml.XmlElement editExe, BuildResultItems buildResultItems, NuGetPackageAssemblyData nugetAssemblyData)
+        private void ProcessLibAssemblies(EditXml.XmlElement editExe, BuildResultItems buildResultItems, NuGetPackageAssemblyData nugetAssemblyData)
         {
             HashSet<string> directoriesWithExplicitDllImport = new HashSet<string>();
             Dictionary<string, string> potentialRemainingDirectoryImports = new Dictionary<string, string>();
@@ -799,7 +816,7 @@
                         var fullRefPath = Path.IsPathRooted(prPath) ? prPath : Path.GetFullPath(Path.Combine(baseDir, prPath));
                         if (File.Exists(fullRefPath))
                         {
-                            var rinfo = MSBuildHelpers.EvaluateReferenceProject(fullRefPath);
+                            var rinfo = MSBuildHelpers.EvaluateReferenceProject(fullRefPath, project.TargetFrameworkMoniker);
                             if (rinfo != null && rinfo.ShouldHarvestAsNuGetAssemblies())
                             {
                                 LogDebug($"Skipping script-library handling for harvested referenced project: {fullRefPath}");
