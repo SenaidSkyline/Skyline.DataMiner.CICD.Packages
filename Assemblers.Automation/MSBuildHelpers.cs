@@ -66,18 +66,18 @@ namespace Skyline.DataMiner.CICD.Assemblers.Automation
             }
             else
             {
-               msproj = new Microsoft.Build.Evaluation.Project(
-               referencedProjectFullPath,
-               new Dictionary<string, string>(),
-               null,
-               pc);
+                msproj = new Microsoft.Build.Evaluation.Project(
+                referencedProjectFullPath,
+                new Dictionary<string, string>(),
+                null,
+                pc);
             }
 
             string Get(string name) =>
                 msproj.GetPropertyValue(name) ?? string.Empty;
 
             var packageId = Get("PackageId");
-            if(string.IsNullOrWhiteSpace(packageId))
+            if (string.IsNullOrWhiteSpace(packageId))
             {
                 packageId = Get("AssemblyName") ?? Path.GetFileNameWithoutExtension(referencedProjectFullPath);
             }
@@ -90,10 +90,10 @@ namespace Skyline.DataMiner.CICD.Assemblers.Automation
             {
                 var targetDir = Get("TargetDir");
                 var assemblyName = Get("AssemblyName");
-                if(!string.IsNullOrWhiteSpace(assemblyName) && !string.IsNullOrWhiteSpace(targetDir))
+                if (!string.IsNullOrWhiteSpace(assemblyName) && !string.IsNullOrWhiteSpace(targetDir))
                 {
-                    var assemblyNameFile=assemblyName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ? assemblyName : $"{assemblyName}.dll";
-                    targetPath=Path.Combine(targetDir, assemblyNameFile);
+                    var assemblyNameFile = assemblyName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ? assemblyName : $"{assemblyName}.dll";
+                    targetPath = Path.Combine(targetDir, assemblyNameFile);
                 }
             }
             string assemblyVersion = string.Empty;
@@ -147,7 +147,7 @@ namespace Skyline.DataMiner.CICD.Assemblers.Automation
 
                 directPackages.Add(new PackageIdentity(id, nugetVersion));
             }
-            
+
             bool isPackable = bool.TryParse(Get("IsPackable"), out var isPackableValue) && isPackableValue;
             bool genPkgOnBuild = bool.TryParse(Get("GeneratePackageOnBuild"), out var gp) && gp;
             string isDataMiner = Get("DataMinerType");
@@ -172,7 +172,7 @@ namespace Skyline.DataMiner.CICD.Assemblers.Automation
         /// <returns>the synthetic package assembly reference, or null if the referenced project is invalid.</returns>
         public static PackageAssemblyReference CreateSyntheticPackageAssembyReference(ReferencedProjectInfo referencedProjectInfo)
         {
-            if(referencedProjectInfo == null || !referencedProjectInfo.ShouldHarvestAsNuGetAssemblies()) return null;
+            if (referencedProjectInfo == null || !referencedProjectInfo.ShouldHarvestAsNuGetAssemblies()) return null;
             var dllImportInfo = referencedProjectInfo.GetDllImportRelativePath().Replace('\\', '/');
             var assemblyPath = referencedProjectInfo.GetSourceAssemblyPath();
             return new PackageAssemblyReference(dllImportInfo, Path.GetFullPath(assemblyPath));
@@ -272,8 +272,9 @@ namespace Skyline.DataMiner.CICD.Assemblers.Automation
 
             return NuGetFramework.ParseFolder(framework);
         }
+
     }
 
-   
+
 }
 
