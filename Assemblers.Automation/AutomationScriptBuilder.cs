@@ -256,6 +256,7 @@
             {
                 nugetAssemblyData = new NuGetPackageAssemblyData();
             }
+    
             foreach (var hrp in harvestedReferencedProjects)
             {
                 try
@@ -804,11 +805,7 @@
         {
             if (projectReference.Name == "AutomationScript_ClassLibrary")
             {
-                return Model.ScriptExes.Any(
-                    x => String.Equals(
-                        x.LibraryName,
-                        "DIS Class Library",
-                        StringComparison.OrdinalIgnoreCase));
+                return Model.ScriptExes.Any(x => String.Equals(x.LibraryName, "DIS Class Library", StringComparison.OrdinalIgnoreCase));
             }
 
             if (FindExeBlockReferenceInScript(project, projectReference) != null)

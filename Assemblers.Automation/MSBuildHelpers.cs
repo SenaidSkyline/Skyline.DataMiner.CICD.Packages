@@ -44,10 +44,7 @@ namespace Skyline.DataMiner.CICD.Assemblers.Automation
                 null,
                 pc);
 
-            var selectedTargetFramework =
-                ResolveTargetFramework(
-                    outerProject,
-                    singleTargetFramework);
+            var selectedTargetFramework = ResolveTargetFramework(outerProject,singleTargetFramework);
             pc.UnloadProject(outerProject);
             Microsoft.Build.Evaluation.Project msproj;
 
@@ -58,23 +55,14 @@ namespace Skyline.DataMiner.CICD.Assemblers.Automation
                     ["TargetFramework"] = selectedTargetFramework,
                 };
 
-                msproj = new Microsoft.Build.Evaluation.Project(
-                    referencedProjectFullPath,
-                    globalProperties,
-                    null,
-                    pc);
+                msproj = new Microsoft.Build.Evaluation.Project(referencedProjectFullPath, globalProperties, null, pc);
             }
             else
             {
-                msproj = new Microsoft.Build.Evaluation.Project(
-                referencedProjectFullPath,
-                new Dictionary<string, string>(),
-                null,
-                pc);
+                msproj = new Microsoft.Build.Evaluation.Project(referencedProjectFullPath, new Dictionary<string, string>(), null, pc);
             }
 
-            string Get(string name) =>
-                msproj.GetPropertyValue(name) ?? string.Empty;
+            string Get(string name) => msproj.GetPropertyValue(name) ?? string.Empty;
 
             var packageId = Get("PackageId");
             if (string.IsNullOrWhiteSpace(packageId))
@@ -113,7 +101,7 @@ namespace Skyline.DataMiner.CICD.Assemblers.Automation
                     .ToDictionary(i => i.EvaluatedInclude, i => i.GetMetadataValue("Version"), StringComparer.OrdinalIgnoreCase);
             }
             var directPackages = new List<PackageIdentity>();
-            //ovdje
+            
 
 
             foreach (var item in msproj.GetItems("PackageReference"))
@@ -177,15 +165,11 @@ namespace Skyline.DataMiner.CICD.Assemblers.Automation
             var assemblyPath = referencedProjectInfo.GetSourceAssemblyPath();
             return new PackageAssemblyReference(dllImportInfo, Path.GetFullPath(assemblyPath));
         }
-        private static string ResolveTargetFramework(
-    Microsoft.Build.Evaluation.Project project,
-    string requestedTargetFramework)
+        private static string ResolveTargetFramework(Microsoft.Build.Evaluation.Project project, string requestedTargetFramework)
         {
-            var targetFramework =
-                project.GetPropertyValue("TargetFramework");
+            var targetFramework = project.GetPropertyValue("TargetFramework");
 
-            var targetFrameworks =
-                project.GetPropertyValue("TargetFrameworks");
+            var targetFrameworks = project.GetPropertyValue("TargetFrameworks");
 
             var declaredFrameworks = new List<string>();
 
