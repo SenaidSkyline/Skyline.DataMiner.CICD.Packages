@@ -1573,30 +1573,20 @@ class Class1 {}]]>
             };
 
             string original = @"
-<DMSScript>
-    <Script>
-        <Exe id=""1"" type=""csharp"">
-            <Value><![CDATA[[Project:Script_1]]]></Value>
-        </Exe>
-    </Script>
-</DMSScript>";
+                <DMSScript>
+                    <Script>
+                        <Exe id=""1"" type=""csharp"">
+                            <Value><![CDATA[[Project:Script_1]]]></Value>
+                        </Exe>
+                    </Script>
+                </DMSScript>";
 
-            Script script =
-                new Script(
-                    XmlDocument.Parse(original));
+            Script script = new Script(XmlDocument.Parse(original));
 
-            AutomationScriptBuilder builder =
-                new AutomationScriptBuilder(
-                    script,
-                    projects,
-                    new List<Script> { script },
-                    directoryForNuGetConfig: null);
+            AutomationScriptBuilder builder = new AutomationScriptBuilder(script,projects, new List<Script> { script }, directoryForNuGetConfig: null);
 
             // Act
-            var result =
-                await builder
-                    .BuildAsync()
-                    .ConfigureAwait(false);
+            var result = await builder.BuildAsync().ConfigureAwait(false);
 
             // Assert
             result.Should().NotBeNull();
@@ -1609,45 +1599,432 @@ class Class1 {}]]>
 
             // LibraryA must be harvested as netstandard2.0,
             // even though the root Automation project targets net48.
-            result.Assemblies.Should().Contain(
-                a =>
-                    a.DllImport.Equals(
-                        expectedLibraryADllImport,
-                        StringComparison.OrdinalIgnoreCase));
+            result.Assemblies.Should().Contain(a => a.DllImport.Equals(expectedLibraryADllImport, StringComparison.OrdinalIgnoreCase));
 
             // LibraryB must receive LibraryA's selected TFM:
             // netstandard2.0, not the root net48.
-            result.Assemblies.Should().Contain(
-                a =>
-                    a.DllImport.Equals(
-                        expectedLibraryBDllImport,
-                        StringComparison.OrdinalIgnoreCase));
+            result.Assemblies.Should().Contain(a => a.DllImport.Equals(expectedLibraryBDllImport, StringComparison.OrdinalIgnoreCase));
 
             // Also verify that the actual physical B assembly came
             // from the netstandard2.0 output.
-            result.Assemblies.Should().Contain(
-                a =>
-                    Path.GetFullPath(a.AssemblyPath)
-                        .Equals(
-                            Path.GetFullPath(libraryBNetStandardAssemblyPath),
-                            StringComparison.OrdinalIgnoreCase));
+            result.Assemblies.Should().Contain(a => Path.GetFullPath(a.AssemblyPath).Equals(Path.GetFullPath(libraryBNetStandardAssemblyPath), StringComparison.OrdinalIgnoreCase));
 
             // This is the important regression assertion:
             // recursive harvesting must NOT jump back to the root net48 TFM.
-            result.Assemblies.Should().NotContain(
-                a =>
-                    a.DllImport.Contains(
-                        "/lib/net48/MultiTargetLibrary.dll"));
+            result.Assemblies.Should().NotContain(a =>a.DllImport.Contains("/lib/net48/MultiTargetLibrary.dll"));
 
-            result.Document.Should().Contain(
-                $@"C:\Skyline DataMiner\ProtocolScripts\DllImport\recursive.librarya\{libraryAAssemblyVersion}\lib\netstandard2.0\RecursiveLibraryA.dll");
+            result.Document.Should().Contain($@"C:\Skyline DataMiner\ProtocolScripts\DllImport\recursive.librarya\{libraryAAssemblyVersion}\lib\netstandard2.0\RecursiveLibraryA.dll");
 
-            result.Document.Should().Contain(
-                $@"C:\Skyline DataMiner\ProtocolScripts\DllImport\multitargetlibrary\{libraryBNetStandardAssemblyVersion}\lib\netstandard2.0\MultiTargetLibrary.dll");
+            result.Document.Should().Contain($@"C:\Skyline DataMiner\ProtocolScripts\DllImport\multitargetlibrary\{libraryBNetStandardAssemblyVersion}\lib\netstandard2.0\MultiTargetLibrary.dll");
 
             result.Document.Should().NotContain("scriptRef");
         }
+        [TestMethod]
+        public void ProjectLoad_SharedProject_DoesNotCreateAssemblyProjectReference()
+        {
+            // Arrange
+            string consumerDirectory = Path.Combine(
+                AppContext.BaseDirectory,
+                "TestFiles",
+                "ProjectReferenceHarvesting",
+                "SharedProjectTest",
+                "Consumer");
+
+            string projectPath = Path.Combine(
+                consumerDirectory,
+                "Consumer.csproj");
+
+            File.Exists(projectPath).Should().BeTrue();
+
+            // Act
+            Project project = Project.Load(projectPath);
+
+            // Assert
+            project.Should().NotBeNull();
+
+            project.ProjectReferences.Should().NotContain(reference =>
+                reference.Path.EndsWith(
+                    ".shproj",
+                    StringComparison.OrdinalIgnoreCase));
+
+            project.ProjectReferences.Should().NotContain(reference =>
+                reference.Path.Contains("SharedCode"));
+
+        }
+        [TestMethod]
+        public void SharedProject_ConsumerBuildsWithoutProducingSharedAssembly()
+        {
+            // Arrange
+            string rootDirectory = Path.Combine(
+                AppContext.BaseDirectory,
+                "TestFiles",
+                "ProjectReferenceHarvesting",
+                "SharedProjectTest");
+
+            string consumerDirectory = Path.Combine(
+                rootDirectory,
+                "Consumer");
+
+            string consumerProjectPath = Path.Combine(
+                consumerDirectory,
+                "Consumer.csproj");
+
+            // Act
+            using Process process = Process.Start(new ProcessStartInfo
+            {
+                FileName = "dotnet",
+                Arguments = $"build \"{consumerProjectPath}\" -c Debug --nologo",
+                WorkingDirectory = consumerDirectory,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            })!;
+
+            string output = process.StandardOutput.ReadToEnd();
+            string errors = process.StandardError.ReadToEnd();
+
+            process.WaitForExit();
+
+            // Assert
+            process.ExitCode.Should().Be(
+                0,
+                $"consumer should build successfully.\nOutput:\n{output}\nErrors:\n{errors}");
+
+            string consumerDll = Path.Combine(
+                consumerDirectory,
+                "bin",
+                "Debug",
+                "netstandard2.0",
+                "Consumer.dll");
+
+            File.Exists(consumerDll).Should().BeTrue();
+
+            string sharedDll = Path.Combine(
+                rootDirectory,
+                "SharedCode",
+                "bin",
+                "Debug",
+                "netstandard2.0",
+                "SharedCode.dll");
+
+            File.Exists(sharedDll).Should().BeFalse(
+                "shared projects contribute source code and should not produce a separate assembly");
+        }
+        [TestMethod]
+        public async Task AutomationScriptBuilder_ProjectReferenceHarvesting_DeepRecursiveReferences_HarvestsAllLibrariesAsync()
+        {
+            // Arrange
+            string testDirectory = TestFixture.InitializeDirectoryForTest();
+
+            string fixtureDirectory = Path.Combine(
+                AppContext.BaseDirectory,
+                "TestFiles",
+                "ProjectReferenceHarvesting",
+                "DeepRecursiveReferences");
+
+            string libraryAProjectPath = Path.Combine(
+                fixtureDirectory,
+                "LibraryA",
+                "LibraryA.csproj");
+
+            string libraryAAssemblyPath = Path.Combine(
+                fixtureDirectory,
+                "LibraryA",
+                "bin",
+                "Debug",
+                "netstandard2.0",
+                "LibraryA.dll");
+
+            string libraryBAssemblyPath = Path.Combine(
+                fixtureDirectory,
+                "LibraryB",
+                "bin",
+                "Debug",
+                "netstandard2.0",
+                "LibraryB.dll");
+
+            string libraryCAssemblyPath = Path.Combine(
+                fixtureDirectory,
+                "LibraryC",
+                "bin",
+                "Debug",
+                "netstandard2.0",
+                "LibraryC.dll");
+
+            string libraryDAssemblyPath = Path.Combine(
+                fixtureDirectory,
+                "LibraryD",
+                "bin",
+                "Debug",
+                "netstandard2.0",
+                "LibraryD.dll");
+
+            File.Exists(libraryAAssemblyPath).Should().BeTrue();
+            File.Exists(libraryBAssemblyPath).Should().BeTrue();
+            File.Exists(libraryCAssemblyPath).Should().BeTrue();
+            File.Exists(libraryDAssemblyPath).Should().BeTrue();
+
+
+
+            string libraryBProjectPath = Path.Combine(
+                fixtureDirectory,
+                "LibraryB",
+                "LibraryB.csproj");
+
+            string libraryCProjectPath = Path.Combine(
+                fixtureDirectory,
+                "LibraryC",
+                "LibraryC.csproj");
+
+            string libraryDProjectPath = Path.Combine(
+                fixtureDirectory,
+                "LibraryD",
+                "LibraryD.csproj");
+
+            var infoA = MSBuildHelpers.EvaluateReferenceProject(
+                libraryAProjectPath,
+                "netstandard2.0");
+
+            var infoB = MSBuildHelpers.EvaluateReferenceProject(
+                libraryBProjectPath,
+                "netstandard2.0");
+
+            var infoC = MSBuildHelpers.EvaluateReferenceProject(
+                libraryCProjectPath,
+                "netstandard2.0");
+
+            var infoD = MSBuildHelpers.EvaluateReferenceProject(
+                libraryDProjectPath,
+                "netstandard2.0");
+
+            infoA.DirectPackageReferences.Should().Contain(p =>
+                p.Id.Equals("Newtonsoft.Json", StringComparison.OrdinalIgnoreCase));
+
+            infoB.DirectPackageReferences.Should().Contain(p =>
+                p.Id.Equals("Polly", StringComparison.OrdinalIgnoreCase));
+
+            infoC.DirectPackageReferences.Should().Contain(p =>
+                p.Id.Equals("Humanizer.Core", StringComparison.OrdinalIgnoreCase));
+
+            infoD.DirectPackageReferences.Should().Contain(p =>
+                p.Id.Equals("CsvHelper", StringComparison.OrdinalIgnoreCase));
+
+            var projectFiles = new[]
+            {
+       new ProjectFile(
+        "Script.cs",
+        @"
+using DeepRecursiveReferences;
+
+public class Script
+{
+    public string Run()
+    {
+        return LibraryA.GetMessage();
     }
+}")
+    };
+
+            var projectReferences = new[]
+            {
+        new ProjectReference(
+            "LibraryA",
+            libraryAProjectPath,
+            libraryAProjectPath),
+    };
+
+            var scriptProject = new Project(
+                "Script_1",
+                path: Path.Combine(testDirectory, "Script_1.csproj"),
+                    tfm: ".NETFramework,Version=v4.8",
+                projectFiles: projectFiles,
+                projectReferences: projectReferences);
+
+            var projects = new Dictionary<string, Project>
+            {
+                ["Script_1"] = scriptProject,
+            };
+
+            string original = @"
+<DMSScript>
+    <Script>
+        <Exe id=""1"" type=""csharp"">
+            <Value><![CDATA[[Project:Script_1]]]></Value>
+        </Exe>
+    </Script>
+</DMSScript>";
+            scriptProject.ProjectReferences.Should().HaveCount(1);
+            Script script = new Script(XmlDocument.Parse(original));
+
+            AutomationScriptBuilder builder =
+                new AutomationScriptBuilder(
+                    script,
+                    projects,
+                    new List<Script> { script },
+                    directoryForNuGetConfig: null);
+
+            // Act
+            var result = await builder
+                .BuildAsync()
+                .ConfigureAwait(false);
+
+            // Assert
+            result.Should().NotBeNull();
+
+            result.Assemblies.Should().Contain(a =>
+                a.DllImport.Equals(
+                    "test.librarya/1.1.0.0/lib/netstandard2.0/LibraryA.dll",
+                    StringComparison.OrdinalIgnoreCase));
+
+            result.Assemblies.Should().Contain(a =>
+                a.DllImport.Equals(
+                    "test.libraryb/2.2.0.0/lib/netstandard2.0/LibraryB.dll",
+                    StringComparison.OrdinalIgnoreCase));
+
+            result.Assemblies.Should().Contain(a =>
+                a.DllImport.Equals(
+                    "test.libraryc/3.3.0.0/lib/netstandard2.0/LibraryC.dll",
+                    StringComparison.OrdinalIgnoreCase));
+
+            result.Assemblies.Should().Contain(a =>
+                a.DllImport.Equals(
+                    "test.libraryd/4.4.0.0/lib/netstandard2.0/LibraryD.dll",
+                    StringComparison.OrdinalIgnoreCase));
+            result.Assemblies.Should().Contain(a =>
+    a.DllImport.Replace('\\', '/').StartsWith(
+        "newtonsoft.json/13.0.3/",
+        StringComparison.OrdinalIgnoreCase));
+
+            result.Assemblies.Should().Contain(a =>
+                a.DllImport.Replace('\\', '/').StartsWith(
+                    "polly/7.2.4/",
+                    StringComparison.OrdinalIgnoreCase));
+
+            result.Assemblies.Should().Contain(a =>
+                a.DllImport.Replace('\\', '/').StartsWith(
+                    "humanizer.core/2.14.1/",
+                    StringComparison.OrdinalIgnoreCase));
+
+            result.Assemblies.Should().Contain(a =>
+                a.DllImport.Replace('\\', '/').StartsWith(
+                    "csvhelper/30.0.1/",
+                    StringComparison.OrdinalIgnoreCase));
+
+        }
+        [TestMethod]
+        public async Task AutomationScriptBuilder_ProjectReferenceHarvesting_ReferencedLibraryPackageReference_IsIncludedAsync()
+        {
+            // Arrange
+            string testDirectory = TestFixture.InitializeDirectoryForTest();
+
+            string fixtureDirectory = Path.Combine(
+                AppContext.BaseDirectory,
+                "TestFiles",
+                "ProjectReferenceHarvesting",
+                "LibraryWithPackageReference");
+
+            string libraryProjectPath = Path.Combine(
+                fixtureDirectory,
+                "LibraryWithPackageReference.csproj");
+
+            string libraryAssemblyPath = Path.Combine(
+                fixtureDirectory,
+                "bin",
+                "Debug",
+                "netstandard2.0",
+                "LibraryWithPackageReference.dll");
+
+            File.Exists(libraryProjectPath).Should().BeTrue();
+            File.Exists(libraryAssemblyPath).Should().BeTrue();
+
+            ReferencedProjectInfo info =
+                MSBuildHelpers.EvaluateReferenceProject(
+                    libraryProjectPath,
+                    "netstandard2.0");
+
+            info.Should().NotBeNull();
+
+            info.DirectPackageReferences.Should().Contain(p =>
+                p.Id.Equals(
+                    "Newtonsoft.Json",
+                    StringComparison.OrdinalIgnoreCase));
+
+            var projectFiles = new[]
+            {
+        new ProjectFile(
+            "Script.cs",
+            @"
+using LibraryWithPackageReference;
+
+public class Script
+{
+    public string Run()
+    {
+        return TestLibrary.GetMessage();
+    }
+}")
+    };
+
+            var projectReferences = new[]
+            {
+        new ProjectReference(
+            "LibraryWithPackageReference",
+            libraryProjectPath,
+            libraryProjectPath),
+    };
+
+            var scriptProject = new Project(
+                "Script_1",
+                path: Path.Combine(testDirectory, "Script_1.csproj"),
+                 tfm: ".NETFramework,Version=v4.8",
+                projectFiles: projectFiles,
+                projectReferences: projectReferences);
+
+            var projects = new Dictionary<string, Project>
+            {
+                ["Script_1"] = scriptProject,
+            };
+
+            string original = @"
+<DMSScript>
+    <Script>
+        <Exe id=""1"" type=""csharp"">
+            <Value><![CDATA[[Project:Script_1]]]></Value>
+        </Exe>
+    </Script>
+</DMSScript>";
+
+            Script script = new Script(XmlDocument.Parse(original));
+
+            AutomationScriptBuilder builder =
+                new AutomationScriptBuilder(
+                    script,
+                    projects,
+                    new List<Script> { script },
+                    directoryForNuGetConfig: null);
+
+            // Act
+            var result = await builder
+                .BuildAsync()
+                .ConfigureAwait(false);
+
+            // Assert
+            result.Should().NotBeNull();
+
+            result.Assemblies.Should().Contain(a =>
+                a.DllImport.Equals(
+                    "test.librarywithpackagereference/1.2.3.4/lib/netstandard2.0/LibraryWithPackageReference.dll",
+                    StringComparison.OrdinalIgnoreCase));
+
+            result.Assemblies.Should().Contain(a =>
+                a.DllImport.StartsWith(
+                    "newtonsoft.json/13.0.3/",
+                    StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+
 }
    
     
