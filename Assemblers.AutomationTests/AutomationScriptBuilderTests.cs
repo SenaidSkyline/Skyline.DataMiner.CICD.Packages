@@ -11,7 +11,7 @@
     using FluentAssertions;
     using Microsoft.Build.Execution;
     using Microsoft.Build.Utilities.ProjectCreation;
-    
+
 
     using Microsoft.Testing.Platform.Extensions.Messages;
     using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -1087,7 +1087,7 @@ class Class1 {}]]>
 
             result.DllAssemblies.Should().BeEmpty();
         }
-        
+
         [TestMethod]
         public async Task AutomationScriptBuilder_DataMinerSolutionId_AllScriptsShouldHaveSameNuGetVersion()
         {
@@ -1201,7 +1201,7 @@ class Class1 {}]]>
                     .GetAssemblyName(assemblyPath)
                     .Version;
 
-        
+
 
             var evaluatedLibrary =
                 MSBuildHelpers.EvaluateReferenceProject(
@@ -1583,7 +1583,7 @@ class Class1 {}]]>
 
             Script script = new Script(XmlDocument.Parse(original));
 
-            AutomationScriptBuilder builder = new AutomationScriptBuilder(script,projects, new List<Script> { script }, directoryForNuGetConfig: null);
+            AutomationScriptBuilder builder = new AutomationScriptBuilder(script, projects, new List<Script> { script }, directoryForNuGetConfig: null);
 
             // Act
             var result = await builder.BuildAsync().ConfigureAwait(false);
@@ -1611,7 +1611,7 @@ class Class1 {}]]>
 
             // This is the important regression assertion:
             // recursive harvesting must NOT jump back to the root net48 TFM.
-            result.Assemblies.Should().NotContain(a =>a.DllImport.Contains("/lib/net48/MultiTargetLibrary.dll"));
+            result.Assemblies.Should().NotContain(a => a.DllImport.Contains("/lib/net48/MultiTargetLibrary.dll"));
 
             result.Document.Should().Contain($@"C:\Skyline DataMiner\ProtocolScripts\DllImport\recursive.librarya\{libraryAAssemblyVersion}\lib\netstandard2.0\RecursiveLibraryA.dll");
 
@@ -1759,7 +1759,7 @@ class Class1 {}]]>
                 "Debug",
                 "netstandard2.0",
                 "LibraryD.dll");
-
+            BuildProject(libraryAProjectPath);
             File.Exists(libraryAAssemblyPath).Should().BeTrue();
             File.Exists(libraryBAssemblyPath).Should().BeTrue();
             File.Exists(libraryCAssemblyPath).Should().BeTrue();
@@ -2018,13 +2018,590 @@ public class Script
                     StringComparison.OrdinalIgnoreCase));
 
             result.Assemblies.Should().Contain(a =>
-                a.DllImport.StartsWith(
-                    "newtonsoft.json/13.0.3/",
+ a.DllImport.Replace('\\', '/').StartsWith(
+     "newtonsoft.json/13.0.3/",
+     StringComparison.OrdinalIgnoreCase));
+        }
+        [TestMethod]
+        public async Task AutomationScriptBuilder_ProjectReferenceHarvesting_DiamondReferences_HarvestsSharedDependencyOnceAsync()
+        {
+            // Arrange
+            string testDirectory = TestFixture.InitializeDirectoryForTest();
+
+            string fixtureDirectory = Path.Combine(
+                AppContext.BaseDirectory,
+                "TestFiles",
+                "ProjectReferenceHarvesting",
+                "DiamondReferences");
+
+            string libraryAProjectPath = Path.Combine(
+                fixtureDirectory,
+                "LibraryA",
+                "LibraryA.csproj");
+
+            string libraryAAssemblyPath = Path.Combine(
+                fixtureDirectory,
+                "LibraryA",
+                "bin",
+                "Debug",
+                "netstandard2.0",
+                "Diamond.LibraryA.dll");
+
+            string libraryBAssemblyPath = Path.Combine(
+                fixtureDirectory,
+                "LibraryB",
+                "bin",
+                "Debug",
+                "netstandard2.0",
+                "Diamond.LibraryB.dll");
+
+            string libraryCAssemblyPath = Path.Combine(
+                fixtureDirectory,
+                "LibraryC",
+                "bin",
+                "Debug",
+                "netstandard2.0",
+                "Diamond.LibraryC.dll");
+
+            string libraryDAssemblyPath = Path.Combine(
+                fixtureDirectory,
+                "LibraryD",
+                "bin",
+                "Debug",
+                "netstandard2.0",
+                "Diamond.LibraryD.dll");
+
+            File.Exists(libraryAProjectPath).Should().BeTrue();
+
+            File.Exists(libraryAAssemblyPath).Should().BeTrue();
+            File.Exists(libraryBAssemblyPath).Should().BeTrue();
+            File.Exists(libraryCAssemblyPath).Should().BeTrue();
+            File.Exists(libraryDAssemblyPath).Should().BeTrue();
+
+            var projectFiles = new[]
+            {
+        new ProjectFile(
+            "Script.cs",
+            @"
+using DiamondReferences;
+
+public class Script
+{
+    public string Run()
+    {
+        return LibraryA.GetMessage();
+    }
+}")
+    };
+
+            // Root Automation Script directly knows ONLY LibraryA.
+            var projectReferences = new[]
+            {
+        new ProjectReference(
+            "LibraryA",
+            libraryAProjectPath,
+            libraryAProjectPath),
+    };
+
+            var scriptProject = new Project(
+                "Script_1",
+                path: Path.Combine(testDirectory, "Script_1.csproj"),
+                tfm: ".NETFramework,Version=v4.8",
+                projectFiles: projectFiles,
+                projectReferences: projectReferences);
+
+            scriptProject.ProjectReferences.Should().HaveCount(1);
+
+            var projects = new Dictionary<string, Project>
+            {
+                ["Script_1"] = scriptProject,
+            };
+
+            string original = @"
+<DMSScript>
+    <Script>
+        <Exe id=""1"" type=""csharp"">
+            <Value><![CDATA[[Project:Script_1]]]></Value>
+        </Exe>
+    </Script>
+</DMSScript>";
+
+            Script script = new Script(XmlDocument.Parse(original));
+
+            AutomationScriptBuilder builder =
+                new AutomationScriptBuilder(
+                    script,
+                    projects,
+                    new List<Script> { script },
+                    directoryForNuGetConfig: null);
+
+            // Act
+            var result = await builder
+                .BuildAsync()
+                .ConfigureAwait(false);
+
+            // Assert
+            result.Should().NotBeNull();
+
+            result.Assemblies.Count(a =>
+                a.DllImport.Contains(
+                    "diamond.librarya/"))
+                .Should()
+                .Be(1);
+
+            result.Assemblies.Count(a =>
+                a.DllImport.Contains(
+                    "diamond.libraryb/"))
+                .Should()
+                .Be(1);
+
+            result.Assemblies.Count(a =>
+                a.DllImport.Contains(
+                    "diamond.libraryc/"))
+                .Should()
+                .Be(1);
+
+            result.Assemblies.Count(a =>
+                a.DllImport.Contains(
+                    "diamond.libraryd/"))
+                .Should()
+                .Be(1);
+
+            // The shared dependency D must not be harvested twice.
+            result.Assemblies
+                .Where(a =>
+                    a.DllImport.Contains(
+                        "diamond.libraryd/"))
+                .Should()
+                .ContainSingle();
+
+            result.Assemblies.Should().Contain(a =>
+                a.DllImport.Equals(
+                    "diamond.librarya/1.0.0.0/lib/netstandard2.0/Diamond.LibraryA.dll",
                     StringComparison.OrdinalIgnoreCase));
+
+            result.Assemblies.Should().Contain(a =>
+                a.DllImport.Equals(
+                    "diamond.libraryb/2.0.0.0/lib/netstandard2.0/Diamond.LibraryB.dll",
+                    StringComparison.OrdinalIgnoreCase));
+
+            result.Assemblies.Should().Contain(a =>
+                a.DllImport.Equals(
+                    "diamond.libraryc/3.0.0.0/lib/netstandard2.0/Diamond.LibraryC.dll",
+                    StringComparison.OrdinalIgnoreCase));
+
+            result.Assemblies.Should().Contain(a =>
+                a.DllImport.Equals(
+                    "diamond.libraryd/4.0.0.0/lib/netstandard2.0/Diamond.LibraryD.dll",
+                    StringComparison.OrdinalIgnoreCase));
+        }
+        [TestMethod]
+        public async Task AutomationScriptBuilder_ProjectReferenceHarvesting_RecursiveMultiTargetReferences_PropagatesSelectedTargetFrameworkAsync()
+        {
+            // Arrange
+            string testDirectory = TestFixture.InitializeDirectoryForTest();
+
+            string fixtureDirectory = Path.Combine(
+                AppContext.BaseDirectory,
+                "TestFiles",
+                "ProjectReferenceHarvesting",
+                "RecursiveMultiTargetReferences");
+
+            string libraryAProjectPath = Path.Combine(
+                fixtureDirectory,
+                "LibraryA",
+                "LibraryA.csproj");
+
+            string libraryBProjectPath = Path.Combine(
+                fixtureDirectory,
+                "LibraryB",
+                "LibraryB.csproj");
+
+            string libraryCProjectPath = Path.Combine(
+                fixtureDirectory,
+                "LibraryC",
+                "LibraryC.csproj");
+
+            string libraryAAssemblyPath = Path.Combine(
+                fixtureDirectory,
+                "LibraryA",
+                "bin",
+                "Debug",
+                "netstandard2.0",
+                "RecursiveMultiTarget.LibraryA.dll");
+
+            string libraryBNetStandardAssemblyPath = Path.Combine(
+                fixtureDirectory,
+                "LibraryB",
+                "bin",
+                "Debug",
+                "netstandard2.0",
+                "RecursiveMultiTarget.LibraryB.dll");
+
+            string libraryBNet48AssemblyPath = Path.Combine(
+                fixtureDirectory,
+                "LibraryB",
+                "bin",
+                "Debug",
+                "net48",
+                "RecursiveMultiTarget.LibraryB.dll");
+
+            string libraryCNetStandard20AssemblyPath = Path.Combine(
+                fixtureDirectory,
+                "LibraryC",
+                "bin",
+                "Debug",
+                "netstandard2.0",
+                "RecursiveMultiTarget.LibraryC.dll");
+
+            string libraryCNetStandard21AssemblyPath = Path.Combine(
+                fixtureDirectory,
+                "LibraryC",
+                "bin",
+                "Debug",
+                "netstandard2.1",
+                "RecursiveMultiTarget.LibraryC.dll");
+
+            File.Exists(libraryAProjectPath).Should().BeTrue();
+            File.Exists(libraryBProjectPath).Should().BeTrue();
+            File.Exists(libraryCProjectPath).Should().BeTrue();
+            BuildProject(libraryCProjectPath);
+            BuildProject(libraryBProjectPath);
+            BuildProject(libraryAProjectPath);
+            File.Exists(libraryAAssemblyPath).Should().BeTrue();
+
+            // Important: both B outputs exist.
+            File.Exists(libraryBNetStandardAssemblyPath).Should().BeTrue();
+            File.Exists(libraryBNet48AssemblyPath).Should().BeTrue();
+
+            // Important: both C outputs exist.
+            File.Exists(libraryCNetStandard20AssemblyPath).Should().BeTrue();
+            File.Exists(libraryCNetStandard21AssemblyPath).Should().BeTrue();
+
+            var projectFiles = new[]
+            {
+        new ProjectFile(
+            "Script.cs",
+            @"
+using RecursiveMultiTargetReferences;
+
+public class Script
+{
+    public string Run()
+    {
+        return LibraryA.GetMessage();
+    }
+}")
+    };
+
+            // Root script directly references ONLY LibraryA.
+            var projectReferences = new[]
+            {
+        new ProjectReference(
+            "LibraryA",
+            libraryAProjectPath,
+            libraryAProjectPath),
+    };
+
+            var scriptProject = new Project(
+                "Script_1",
+                path: Path.Combine(
+                    testDirectory,
+                    "Script_1.csproj"),
+                tfm: ".NETFramework,Version=v4.8",
+                projectFiles: projectFiles,
+                projectReferences: projectReferences);
+
+            scriptProject.ProjectReferences
+                .Should()
+                .HaveCount(1);
+
+            var projects = new Dictionary<string, Project>
+            {
+                ["Script_1"] = scriptProject,
+            };
+
+            string original = @"
+<DMSScript>
+    <Script>
+        <Exe id=""1"" type=""csharp"">
+            <Value><![CDATA[[Project:Script_1]]]></Value>
+        </Exe>
+    </Script>
+</DMSScript>";
+
+            Script script =
+                new Script(XmlDocument.Parse(original));
+
+            AutomationScriptBuilder builder =
+                new AutomationScriptBuilder(
+                    script,
+                    projects,
+                    new List<Script> { script },
+                    directoryForNuGetConfig: null);
+
+            // Act
+            var result = await builder
+                .BuildAsync()
+                .ConfigureAwait(false);
+
+            // Assert
+            result.Should().NotBeNull();
+
+            // A only targets netstandard2.0.
+            result.Assemblies.Should().Contain(a =>
+                a.DllImport.Replace('\\', '/').Equals(
+                    "recursivemultitarget.librarya/1.0.0.0/lib/netstandard2.0/RecursiveMultiTarget.LibraryA.dll",
+                    StringComparison.OrdinalIgnoreCase));
+
+            // B supports netstandard2.0 and net48.
+            // It must inherit A's selected netstandard2.0.
+            result.Assemblies.Should().Contain(a =>
+                a.DllImport.Replace('\\', '/').Equals(
+                    "recursivemultitarget.libraryb/2.0.0.0/lib/netstandard2.0/RecursiveMultiTarget.LibraryB.dll",
+                    StringComparison.OrdinalIgnoreCase));
+
+            // C supports netstandard2.0 and netstandard2.1.
+            // It must inherit B's selected netstandard2.0.
+            result.Assemblies.Should().Contain(a =>
+                a.DllImport.Replace('\\', '/').Equals(
+                    "recursivemultitarget.libraryc/3.0.0.0/lib/netstandard2.0/RecursiveMultiTarget.LibraryC.dll",
+                    StringComparison.OrdinalIgnoreCase));
+
+            // B must NOT fall back to the root script's net48.
+            result.Assemblies.Should().NotContain(a =>
+                a.DllImport.Replace('\\', '/').Contains(
+                    "recursivemultitarget.libraryb/2.0.0.0/lib/net48/"));
+
+            // C must NOT select its other target.
+            result.Assemblies.Should().NotContain(a =>
+                a.DllImport.Replace('\\', '/').Contains(
+                    "recursivemultitarget.libraryc/3.0.0.0/lib/netstandard2.1/"));
+        }
+        private static void BuildProject(string projectPath)
+        {
+            using var process = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = "dotnet",
+                    Arguments = $"build \"{projectPath}\"",
+                    WorkingDirectory = Path.GetDirectoryName(projectPath),
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                },
+            };
+
+            process.Start();
+
+            string output = process.StandardOutput.ReadToEnd();
+            string error = process.StandardError.ReadToEnd();
+
+            process.WaitForExit();
+
+            Console.WriteLine(output);
+
+            if (!String.IsNullOrWhiteSpace(error))
+            {
+                Console.WriteLine(error);
+            }
+
+            if (process.ExitCode != 0)
+            {
+                Assert.Fail(
+                    $"Failed to build fixture project '{projectPath}'." +
+                    Environment.NewLine +
+                    output +
+                    Environment.NewLine +
+                    error);
+            }
+
+        }
+        [TestMethod]
+        public async Task AutomationScriptBuilder_ProjectReferenceHarvesting_RecursiveLibraryWithSharedProject_HarvestsLibrariesWithoutSharedAssemblyAsync()
+        {
+            // Arrange
+            string testDirectory = TestFixture.InitializeDirectoryForTest();
+
+            string fixtureDirectory = Path.Combine(
+                AppContext.BaseDirectory,
+                "TestFiles",
+                "ProjectReferenceHarvesting",
+                "RecursiveSharedProjectReference");
+
+            string libraryAProjectPath = Path.Combine(
+                fixtureDirectory,
+                "LibraryA",
+                "LibraryA.csproj");
+
+            string libraryBProjectPath = Path.Combine(
+                fixtureDirectory,
+                "LibraryB",
+                "LibraryB.csproj");
+
+            string sharedProjectPath = Path.Combine(
+                fixtureDirectory,
+                "SharedProject",
+                "SharedProject.shproj");
+
+            string sharedProjItemsPath = Path.Combine(
+                fixtureDirectory,
+                "SharedProject",
+                "SharedProject.projitems");
+
+            File.Exists(libraryAProjectPath).Should().BeTrue();
+            File.Exists(libraryBProjectPath).Should().BeTrue();
+            File.Exists(sharedProjectPath).Should().BeTrue();
+            File.Exists(sharedProjItemsPath).Should().BeTrue();
+
+            // Build A. This builds B as its ProjectReference.
+            // SharedProject source is compiled into B.
+            BuildProject(libraryAProjectPath);
+
+            string libraryAAssemblyPath = Path.Combine(
+                fixtureDirectory,
+                "LibraryA",
+                "bin",
+                "Debug",
+                "netstandard2.0",
+                "RecursiveShared.LibraryA.dll");
+
+            string libraryBAssemblyPath = Path.Combine(
+                fixtureDirectory,
+                "LibraryB",
+                "bin",
+                "Debug",
+                "netstandard2.0",
+                "RecursiveShared.LibraryB.dll");
+
+            string sharedAssemblyPath = Path.Combine(
+                fixtureDirectory,
+                "SharedProject",
+                "bin",
+                "Debug",
+                "netstandard2.0",
+                "SharedProject.dll");
+
+            File.Exists(libraryAAssemblyPath)
+                .Should()
+                .BeTrue();
+
+            File.Exists(libraryBAssemblyPath)
+                .Should()
+                .BeTrue();
+
+            // Shared Project must not produce its own assembly.
+            File.Exists(sharedAssemblyPath)
+                .Should()
+                .BeFalse();
+
+            var projectFiles = new[]
+            {
+        new ProjectFile(
+            "Script.cs",
+            @"
+using RecursiveSharedProjectReference;
+
+public class Script
+{
+    public string Run()
+    {
+        return LibraryA.GetMessage();
+    }
+}")
+    };
+
+            var projectReferences = new[]
+            {
+        new ProjectReference(
+            "LibraryA",
+            libraryAProjectPath,
+            libraryAProjectPath),
+    };
+
+            var scriptProject = new Project(
+                "Script_1",
+                path: Path.Combine(
+                    testDirectory,
+                    "Script_1.csproj"),
+                tfm: ".NETFramework,Version=v4.8",
+                projectFiles: projectFiles,
+                projectReferences: projectReferences);
+
+            // Script directly references ONLY A.
+            scriptProject.ProjectReferences
+                .Should()
+                .HaveCount(1);
+
+            var projects = new Dictionary<string, Project>
+            {
+                ["Script_1"] = scriptProject,
+            };
+
+            string original = @"
+<DMSScript>
+    <Script>
+        <Exe id=""1"" type=""csharp"">
+            <Value><![CDATA[[Project:Script_1]]]></Value>
+        </Exe>
+    </Script>
+</DMSScript>";
+
+            Script script =
+                new Script(XmlDocument.Parse(original));
+
+            AutomationScriptBuilder builder =
+                new AutomationScriptBuilder(
+                    script,
+                    projects,
+                    new List<Script> { script },
+                    directoryForNuGetConfig: null);
+
+            // Act
+            var result = await builder
+                .BuildAsync()
+                .ConfigureAwait(false);
+
+            // Assert
+            result.Should().NotBeNull();
+
+            // A is harvested.
+            result.Assemblies.Should().Contain(a =>
+                a.DllImport
+                    .Replace('\\', '/')
+                    .Equals(
+                        "recursiveshared.librarya/1.0.0.0/lib/netstandard2.0/RecursiveShared.LibraryA.dll",
+                        StringComparison.OrdinalIgnoreCase));
+
+            // B is recursively harvested.
+            result.Assemblies.Should().Contain(a =>
+                a.DllImport
+                    .Replace('\\', '/')
+                    .Equals(
+                        "recursiveshared.libraryb/2.0.0.0/lib/netstandard2.0/RecursiveShared.LibraryB.dll",
+                        StringComparison.OrdinalIgnoreCase));
+
+            // Shared Project must not become a harvested assembly.
+            result.Assemblies.Should().NotContain(a =>
+                a.DllImport.Contains(
+                    "SharedProject.dll"));
+
+            result.Assemblies.Should().NotContain(a =>
+                a.AssemblyPath != null &&
+                a.AssemblyPath.EndsWith(
+                    "SharedProject.dll",
+                    StringComparison.OrdinalIgnoreCase));
+
+            // Only A is directly referenced by the root script.
+            scriptProject.ProjectReferences
+                .Should()
+                .ContainSingle();
         }
     }
 
 
 }
-   
-    
+
+

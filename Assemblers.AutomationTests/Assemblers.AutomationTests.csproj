@@ -32,9 +32,7 @@
     </Content>
   </ItemGroup>
 
-  <ItemGroup>
-    <None Include="TestFiles\ProjectReferenceHarvesting\DeepRecursiveReferences\LibraryB\LibraryB.csproj" />
-  </ItemGroup>
+
 
   <ItemGroup>
     <!-- Ensures the SDK NuGet package is in the cache for test project evaluation -->
